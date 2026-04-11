@@ -3,17 +3,14 @@ package main
 import (
 	"invoice-generator-backend/config"
 	"invoice-generator-backend/routes"
-	"log"
 
 	"github.com/joho/godotenv"
 )
 
 func main() {
-	// .env.local overrides .env — use it for local development
-	_ = godotenv.Load(".env.local")
-	if err := godotenv.Load(); err != nil {
-		log.Fatal("Error loading .env")
-	}
+	// Load shared defaults first; .env.local (if present) can override for local dev.
+	_ = godotenv.Load()
+	_ = godotenv.Overload(".env.local")
 
 	config.ConnectDB()
 
