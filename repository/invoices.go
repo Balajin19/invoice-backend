@@ -83,6 +83,38 @@ func syncInvoiceSettingsCurrentNumber(tx *sql.Tx, userEmail, companyID, invoiceN
 	return nil
 }
 
+func replaceInvoiceProducts(tx *sql.Tx, invoiceID string, products []models.InvoiceProduct) ([]models.InvoiceProduct, error) {
+	if _, err := tx.Exec(`DELETE FROM invoice_products WHERE invoice_id = $1`, invoiceID); err != nil {
+		return nil, err
+	}
+
+	updatedProducts := make([]models.InvoiceProduct, len(products))
+	copy(updatedProducts, products)
+
+	for i, product := range updatedProducts {
+		err := tx.QueryRow(`
+			INSERT INTO invoice_products (invoice_id, product_id, product_name, unit, qty, price, discount, total)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			RETURNING id
+		`,
+			invoiceID,
+			nullableUUID(product.ProductId),
+			product.ProductName,
+			product.Unit,
+			product.Qty,
+			product.Price,
+			product.Discount,
+			product.Total,
+		).Scan(&updatedProducts[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		updatedProducts[i].InvoiceId = invoiceID
+	}
+
+	return updatedProducts, nil
+}
+
 func GetAllInvoices(companyID string) ([]models.Invoice, error) {
 	nullCompanyID := nullableUUID(companyID)
 
@@ -360,6 +392,12 @@ func CreateInvoice(userEmail string, invoice models.Invoice) (*models.Invoice, e
 }
 
 func UpdateInvoice(invoiceID string, invoice models.Invoice, userEmail string) (*models.Invoice, error) {
+	tx, err := config.DB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
 	query := `
 	UPDATE invoices
 	SET invoice_number   = $1,
@@ -383,7 +421,7 @@ func UpdateInvoice(invoiceID string, invoice models.Invoice, userEmail string) (
 	    updated_by       = $19
 	WHERE invoice_id = $20
 	`
-	result, err := config.DB.Exec(query,
+	result, err := tx.Exec(query,
 		invoice.InvoiceNumber,
 		invoice.InvoiceDate,
 		nullableUUID(invoice.CompanyId),
@@ -415,6 +453,20 @@ func UpdateInvoice(invoiceID string, invoice models.Invoice, userEmail string) (
 	if rowsAffected == 0 {
 		return nil, sql.ErrNoRows
 	}
+
+	invoice.Products, err = replaceInvoiceProducts(tx, invoiceID, invoice.Products)
+	if err != nil {
+		return nil, err
+	}
+
+	if err = syncInvoiceSettingsCurrentNumber(tx, userEmail, invoice.CompanyId, invoice.InvoiceNumber); err != nil {
+		return nil, err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+
 	invoice.InvoiceId = invoiceID
 	return &invoice, nil
 }
