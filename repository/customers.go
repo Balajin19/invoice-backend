@@ -8,6 +8,25 @@ import (
 	"invoice-generator-backend/internal/models"
 )
 
+func replaceCustomerProducts(tx *sql.Tx, customerID string, products []models.CustomerProduct) error {
+	if _, err := tx.Exec(`DELETE FROM customer_products WHERE customer_id = $1`, customerID); err != nil {
+		return err
+	}
+
+	for _, p := range products {
+		if _, err := tx.Exec(
+			`INSERT INTO customer_products (customer_id, product_id, price) VALUES ($1, $2, $3)`,
+			customerID,
+			p.ProductId,
+			p.Price,
+		); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func GetAllCustomers() ([]models.Customer, error) {
 	query := `
 	SELECT
@@ -179,12 +198,18 @@ func CreateCustomer(customer models.Customer) (*models.Customer, error) {
 		return nil, ErrDuplicateCustomer
 	}
 
+	tx, err := config.DB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
 	query := `
 	INSERT INTO customers (customer_id, customer_name, building_number, street, city, district, state, pincode, gstin)
 	VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8)
 	RETURNING customer_id
 	`
-	err = config.DB.QueryRow(query,
+	err = tx.QueryRow(query,
 		customer.CustomerName,
 		customer.Address.BuildingNo,
 		customer.Address.Street,
@@ -197,7 +222,16 @@ func CreateCustomer(customer models.Customer) (*models.Customer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &customer, nil
+
+	if err := replaceCustomerProducts(tx, customer.CustomerId, customer.Products); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return GetCustomerByID(customer.CustomerId)
 }
 
 func UpdateCustomer(customerId string, customer models.Customer) (*models.Customer, error) {
@@ -243,7 +277,13 @@ func UpdateCustomer(customerId string, customer models.Customer) (*models.Custom
 	    gstin           = $8
 	WHERE customer_id = $9
 	`
-	result, err := config.DB.Exec(query,
+	tx, err := config.DB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	result, err := tx.Exec(query,
 		customer.CustomerName,
 		customer.Address.BuildingNo,
 		customer.Address.Street,
@@ -264,8 +304,16 @@ func UpdateCustomer(customerId string, customer models.Customer) (*models.Custom
 	if rowsAffected == 0 {
 		return nil, sql.ErrNoRows
 	}
-	customer.CustomerId = customerId
-	return &customer, nil
+
+	if err := replaceCustomerProducts(tx, customerId, customer.Products); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return GetCustomerByID(customerId)
 }
 
 func DeleteCustomer(customerId string) error {

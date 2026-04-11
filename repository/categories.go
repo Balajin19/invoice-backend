@@ -8,7 +8,7 @@ import (
 )
 
 func GetAllCategories() ([]models.Category, error) {
-	rows, err := config.DB.Query(`SELECT category_id, category_name FROM categories ORDER BY category_name ASC`)
+	rows, err := config.DB.Query(`SELECT category_id, category_name, created_by, updated_by FROM categories ORDER BY category_name ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -17,7 +17,7 @@ func GetAllCategories() ([]models.Category, error) {
 	categories := make([]models.Category, 0)
 	for rows.Next() {
 		var c models.Category
-		if err := rows.Scan(&c.CategoryId, &c.CategoryName); err != nil {
+		if err := rows.Scan(&c.CategoryId, &c.CategoryName, &c.CreatedBy, &c.UpdatedBy); err != nil {
 			return nil, err
 		}
 		categories = append(categories, c)
@@ -28,9 +28,9 @@ func GetAllCategories() ([]models.Category, error) {
 func GetCategoryByID(categoryID string) (*models.Category, error) {
 	var c models.Category
 	err := config.DB.QueryRow(
-		`SELECT category_id, category_name FROM categories WHERE category_id = $1`,
+		`SELECT category_id, category_name, created_by, updated_by FROM categories WHERE category_id = $1`,
 		categoryID,
-	).Scan(&c.CategoryId, &c.CategoryName)
+	).Scan(&c.CategoryId, &c.CategoryName, &c.CreatedBy, &c.UpdatedBy)
 	if err != nil {
 		return nil, err
 	}
@@ -55,9 +55,9 @@ func CreateCategory(category models.Category) (*models.Category, error) {
 	}
 
 	err = config.DB.QueryRow(
-		`INSERT INTO categories (category_id, category_name) VALUES (gen_random_uuid(), $1) RETURNING category_id`,
-		category.CategoryName,
-	).Scan(&category.CategoryId)
+		`INSERT INTO categories (category_id, category_name, created_by, updated_by, created_at_epoch, updated_at_epoch) VALUES (gen_random_uuid(), $1, $2, $2, EXTRACT(EPOCH FROM NOW())::BIGINT, EXTRACT(EPOCH FROM NOW())::BIGINT) RETURNING category_id, created_by, updated_by`,
+		category.CategoryName, category.CreatedBy,
+	).Scan(&category.CategoryId, &category.CreatedBy, &category.UpdatedBy)
 	if err != nil {
 		return nil, err
 	}
@@ -84,8 +84,8 @@ func UpdateCategory(categoryID string, category models.Category) (*models.Catego
 	}
 
 	result, err := config.DB.Exec(
-		`UPDATE categories SET category_name = $1 WHERE category_id = $2`,
-		category.CategoryName, categoryID,
+		`UPDATE categories SET category_name = $1, updated_by = $2, updated_at = CURRENT_TIMESTAMP, updated_at_epoch = EXTRACT(EPOCH FROM NOW())::BIGINT WHERE category_id = $3`,
+		category.CategoryName, category.UpdatedBy, categoryID,
 	)
 	if err != nil {
 		return nil, err

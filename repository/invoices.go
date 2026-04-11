@@ -299,7 +299,7 @@ func CreateInvoice(userEmail string, invoice models.Invoice) (*models.Invoice, e
 		customer_address, gstin, payment_terms, po_number, po_date, sub_total, cgst, sgst, igst,
 		rounded_off, total_tax, total_amount, amount_in_words, created_by, updated_by
 	)
-	VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $18)
+	VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $19)
 	RETURNING invoice_id
 	`
 	err = tx.QueryRow(query,

@@ -36,6 +36,11 @@ func GetCategoryByID(c *gin.Context) {
 }
 
 func CreateCategory(c *gin.Context) {
+	email, ok := userEmail(c)
+	if !ok {
+		return
+	}
+
 	var rawData json.RawMessage
 	if err := c.ShouldBindJSON(&rawData); err != nil {
 		logOperationError("create category bind payload", err)
@@ -46,7 +51,7 @@ func CreateCategory(c *gin.Context) {
 	// Check if it's an array or single object
 	if len(rawData) > 0 && rawData[0] == '[' {
 		// Handle as array (bulk)
-		handleBulkCategories(c, rawData)
+		handleBulkCategories(c, rawData, email)
 	} else {
 		// Handle as single object
 		var category models.Category
@@ -55,6 +60,8 @@ func CreateCategory(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		category.CreatedBy = email
+		category.UpdatedBy = email
 		created, err := repository.CreateCategory(category)
 		if err != nil {
 			if errors.Is(err, repository.ErrDuplicateCategory) {
@@ -71,7 +78,7 @@ func CreateCategory(c *gin.Context) {
 	}
 }
 
-func handleBulkCategories(c *gin.Context, rawData json.RawMessage) {
+func handleBulkCategories(c *gin.Context, rawData json.RawMessage, email string) {
 	var categories []models.Category
 	if err := json.Unmarshal(rawData, &categories); err != nil {
 		logOperationError("bulk create categories unmarshal payload", err)
@@ -89,6 +96,8 @@ func handleBulkCategories(c *gin.Context, rawData json.RawMessage) {
 	var failedCategories []gin.H
 
 	for _, category := range categories {
+		category.CreatedBy = email
+		category.UpdatedBy = email
 		result, err := repository.CreateCategory(category)
 		if err != nil {
 			logOperationError("bulk create category name="+category.CategoryName, err)
@@ -118,6 +127,11 @@ func handleBulkCategories(c *gin.Context, rawData json.RawMessage) {
 }
 
 func UpdateCategory(c *gin.Context) {
+	email, ok := userEmail(c)
+	if !ok {
+		return
+	}
+
 	categoryID := c.Param("id")
 	var category models.Category
 	if err := c.ShouldBindJSON(&category); err != nil {
@@ -125,6 +139,7 @@ func UpdateCategory(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	category.UpdatedBy = email
 	updated, err := repository.UpdateCategory(categoryID, category)
 	if err != nil {
 		if errors.Is(err, repository.ErrDuplicateCategory) {

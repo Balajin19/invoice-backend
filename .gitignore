@@ -32,3 +32,4 @@ go.work
 # Environment
 .env
 .env.local
+.env.example
