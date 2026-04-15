@@ -13,11 +13,13 @@ func GetAllProducts() ([]models.Product, error) {
 		p.product_id,
 		p.product_name,
 		COALESCE(p.hsn_sac, ''),
-		p.unit,
+		p.unit_id,
+		COALESCE(u.unit_name, ''),
 		p.category_id,
 		c.category_name
 	FROM products p
 	LEFT JOIN categories c ON c.category_id = p.category_id
+	LEFT JOIN units u ON u.unit_id = p.unit_id
 	ORDER BY p.product_name ASC
 	`
 
@@ -36,6 +38,7 @@ func GetAllProducts() ([]models.Product, error) {
 			&product.ProductId,
 			&product.ProductName,
 			&product.HSNSAC,
+			&product.UnitID,
 			&product.Unit,
 			&product.CategoryId,
 			&product.CategoryName,
@@ -60,11 +63,13 @@ func GetProductsByCategoryID(categoryID string) ([]models.Product, error) {
 		p.product_id,
 		p.product_name,
 		COALESCE(p.hsn_sac, ''),
-		p.unit,
+		p.unit_id,
+		COALESCE(u.unit_name, ''),
 		p.category_id,
 		c.category_name
 	FROM products p
 	LEFT JOIN categories c ON c.category_id = p.category_id
+	LEFT JOIN units u ON u.unit_id = p.unit_id
 	WHERE p.category_id = $1
 	ORDER BY p.product_name ASC
 	`
@@ -84,6 +89,7 @@ func GetProductsByCategoryID(categoryID string) ([]models.Product, error) {
 			&product.ProductId,
 			&product.ProductName,
 			&product.HSNSAC,
+			&product.UnitID,
 			&product.Unit,
 			&product.CategoryId,
 			&product.CategoryName,
@@ -108,11 +114,13 @@ func GetProductByID(productID string) (*models.Product, error) {
 		p.product_id,
 		p.product_name,
 		COALESCE(p.hsn_sac, ''),
-		p.unit,
+		p.unit_id,
+		COALESCE(u.unit_name, ''),
 		p.category_id,
 		c.category_name
 	FROM products p
 	LEFT JOIN categories c ON c.category_id = p.category_id
+	LEFT JOIN units u ON u.unit_id = p.unit_id
 	WHERE p.product_id = $1
 	`
 
@@ -122,6 +130,7 @@ func GetProductByID(productID string) (*models.Product, error) {
 		&product.ProductId,
 		&product.ProductName,
 		&product.HSNSAC,
+		&product.UnitID,
 		&product.Unit,
 		&product.CategoryId,
 		&product.CategoryName,
@@ -140,11 +149,11 @@ func CreateProduct(product models.Product, actorEmail string) (*models.Product, 
 			SELECT 1
 			FROM products
 			WHERE lower(trim(product_name)) = lower(trim($1))
-			  AND lower(trim(unit)) = lower(trim($2))
+			  AND unit_id = $2
 			  AND category_id = $3
 		)`,
 		product.ProductName,
-		product.Unit,
+		product.UnitID,
 		product.CategoryId,
 	).Scan(&exists)
 	if err != nil {
@@ -155,21 +164,21 @@ func CreateProduct(product models.Product, actorEmail string) (*models.Product, 
 	}
 
 	query := `
-	INSERT INTO products (product_id, product_name, hsn_sac, unit, category_id, created_by, updated_by)
+	INSERT INTO products (product_id, product_name, hsn_sac, unit_id, category_id, created_by, updated_by)
 	VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $5)
 	RETURNING product_id
 	`
 	err = config.DB.QueryRow(query,
 		product.ProductName,
 		product.HSNSAC,
-		product.Unit,
+		product.UnitID,
 		product.CategoryId,
 		actorEmail,
 	).Scan(&product.ProductId)
 	if err != nil {
 		return nil, err
 	}
-	return &product, nil
+	return GetProductByID(product.ProductId)
 }
 
 func UpdateProduct(productID string, product models.Product, actorEmail string) (*models.Product, error) {
@@ -179,12 +188,12 @@ func UpdateProduct(productID string, product models.Product, actorEmail string) 
 			SELECT 1
 			FROM products
 			WHERE lower(trim(product_name)) = lower(trim($1))
-			  AND lower(trim(unit)) = lower(trim($2))
+			  AND unit_id = $2
 			  AND category_id = $3
 			  AND product_id <> $4
 		)`,
 		product.ProductName,
-		product.Unit,
+		product.UnitID,
 		product.CategoryId,
 		productID,
 	).Scan(&exists)
@@ -199,7 +208,7 @@ func UpdateProduct(productID string, product models.Product, actorEmail string) 
 	UPDATE products
 	SET product_name = $1,
 	    hsn_sac      = $2,
-	    unit         = $3,
+	    unit_id      = $3,
 	    category_id  = $4,
 	    updated_by   = $5
 	WHERE product_id = $6
@@ -207,7 +216,7 @@ func UpdateProduct(productID string, product models.Product, actorEmail string) 
 	result, err := config.DB.Exec(query,
 		product.ProductName,
 		product.HSNSAC,
-		product.Unit,
+		product.UnitID,
 		product.CategoryId,
 		actorEmail,
 		productID,
@@ -222,8 +231,7 @@ func UpdateProduct(productID string, product models.Product, actorEmail string) 
 	if rowsAffected == 0 {
 		return nil, sql.ErrNoRows
 	}
-	product.ProductId = productID
-	return &product, nil
+	return GetProductByID(productID)
 }
 
 func DeleteProduct(productID string) error {

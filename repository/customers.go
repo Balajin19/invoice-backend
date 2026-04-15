@@ -15,9 +15,10 @@ func replaceCustomerProducts(tx *sql.Tx, customerID string, products []models.Cu
 
 	for _, p := range products {
 		if _, err := tx.Exec(
-			`INSERT INTO customer_products (customer_id, product_id, price) VALUES ($1, $2, $3)`,
+			`INSERT INTO customer_products (customer_id, product_id, unit_id, price) VALUES ($1, $2, $3, $4)`,
 			customerID,
 			p.ProductId,
+			p.UnitID,
 			p.Price,
 		); err != nil {
 			return err
@@ -44,13 +45,15 @@ func GetAllCustomers() ([]models.Customer, error) {
 				SELECT json_agg(
 					json_build_object(
 						'productId', cp.product_id,
+						'unitId', cp.unit_id,
 						'productName', p.product_name,
-						'unit', p.unit,
+						'unit', COALESCE(u.unit_name, ''),
 						'price', cp.price
 					)
 				)
 				FROM customer_products cp
 				LEFT JOIN products p ON p.product_id = cp.product_id
+				LEFT JOIN units u ON u.unit_id = cp.unit_id
 				WHERE cp.customer_id = c.customer_id
 			),
 			'[]'::json
@@ -121,13 +124,15 @@ func GetCustomerByID(customerId string) (*models.Customer, error) {
 				SELECT json_agg(
 					json_build_object(
 						'productId', cp.product_id,
+						'unitId', cp.unit_id,
 						'productName', p.product_name,
-						'unit', p.unit,
+						'unit', COALESCE(u.unit_name, ''),
 						'price', cp.price
 					)
 				)
 				FROM customer_products cp
 				LEFT JOIN products p ON p.product_id = cp.product_id
+				LEFT JOIN units u ON u.unit_id = cp.unit_id
 				WHERE cp.customer_id = c.customer_id
 			),
 			'[]'::json

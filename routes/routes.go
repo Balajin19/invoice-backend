@@ -100,6 +100,13 @@ func SetupRoutes() *gin.Engine {
 	protected.PUT("/category/:id", handler.UpdateCategory)
 	protected.DELETE("/category/:id", handler.DeleteCategory)
 
+	// Units
+	protected.GET("/units", handler.GetUnits)
+	protected.POST("/units", handler.CreateUnit)
+	protected.GET("/unit/:id", handler.GetUnitByID)
+	protected.PUT("/unit/:id", handler.UpdateUnit)
+	protected.DELETE("/unit/:id", handler.DeleteUnit)
+
 	// Invoices
 	protected.GET("/invoices", handler.GetInvoices)
 	protected.POST("/invoices", handler.CreateInvoice)

@@ -8,7 +8,7 @@ import (
 )
 
 func GetAllCategories() ([]models.Category, error) {
-	rows, err := config.DB.Query(`SELECT category_id, category_name, created_by, updated_by FROM categories ORDER BY category_name ASC`)
+	rows, err := config.DB.Query(`SELECT category_id, category_name, COALESCE(created_by, ''), COALESCE(updated_by, '') FROM categories ORDER BY category_name ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -28,7 +28,7 @@ func GetAllCategories() ([]models.Category, error) {
 func GetCategoryByID(categoryID string) (*models.Category, error) {
 	var c models.Category
 	err := config.DB.QueryRow(
-		`SELECT category_id, category_name, created_by, updated_by FROM categories WHERE category_id = $1`,
+		`SELECT category_id, category_name, COALESCE(created_by, ''), COALESCE(updated_by, '') FROM categories WHERE category_id = $1`,
 		categoryID,
 	).Scan(&c.CategoryId, &c.CategoryName, &c.CreatedBy, &c.UpdatedBy)
 	if err != nil {

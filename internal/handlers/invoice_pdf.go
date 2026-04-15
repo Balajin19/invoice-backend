@@ -74,6 +74,37 @@ func customerInvoiceDetails(invoice *models.Invoice) string {
 	return strings.TrimSpace(fmt.Sprintf("%s\n%s\nGSTIN: %s", invoice.CustomerName, invoice.Address, firstNonEmpty(invoice.GSTIN, "-")))
 }
 
+func buildTermsConditions(template, paymentTerms string) string {
+	termsTemplate := strings.TrimSpace(template)
+	if termsTemplate == "" {
+		return ""
+	}
+
+	lines := strings.Split(termsTemplate, "\n")
+	filtered := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		lower := strings.ToLower(trimmed)
+		if strings.Contains(lower, "payment terms") || strings.Contains(lower, "{{payment_terms}}") {
+			continue
+		}
+		filtered = append(filtered, trimmed)
+	}
+
+	paymentTermsLine := fmt.Sprintf("%d. Payment Terms : {{payment_terms}}", len(filtered)+1)
+	termsWithPayment := strings.Join(append(filtered, paymentTermsLine), "\n")
+
+	paymentValue := strings.TrimSpace(paymentTerms)
+	if paymentValue == "" {
+		paymentValue = "0"
+	}
+
+	return strings.ReplaceAll(termsWithPayment, "{{payment_terms}}", fmt.Sprintf("Within %s days", paymentValue))
+}
+
 func selectCompany(companies []models.Companies, userEmail string) *models.Companies {
 	filtered := make([]models.Companies, 0)
 	for _, company := range companies {
@@ -144,10 +175,11 @@ func buildInvoicePDFData(userEmail string, invoice *models.Invoice) (*invoicePDF
 		}
 	}
 
-	terms := ""
+	termsTemplate := ""
 	if settings != nil {
-		terms = strings.ReplaceAll(settings.TermsConditions, "{{payment_terms}}", strings.TrimSpace(invoice.PaymentTerms))
+		termsTemplate = settings.TermsConditions
 	}
+	terms := buildTermsConditions(termsTemplate, invoice.PaymentTerms)
 
 	return &invoicePDFData{
 		Company:          company,
@@ -319,8 +351,8 @@ func buildInvoicePDF(invoice *models.Invoice, data *invoicePDFData) ([]byte, err
 	y2 := pdf.GetY()
 
 	// Invoice Details
-	pdf.SetXY(8+buyerCol+consigneeCol, yStart+1.5)
-	pdf.SetFont("Arial", "", 9)
+	detailsX := 8 + buyerCol + consigneeCol
+	detailsY := yStart + 1.5
 	poValue := strings.TrimSpace(invoice.PONumber)
 	if poValue == "" {
 		poValue = "-"
@@ -329,13 +361,21 @@ func buildInvoicePDF(invoice *models.Invoice, data *invoicePDFData) ([]byte, err
 	if invoice.PODate != nil && !invoice.PODate.IsZero() {
 		poDateValue = invoice.PODate.Format("02-01-2006")
 	}
-	pdf.MultiCell(invoiceCol, 5,
-		fmt.Sprintf("Invoice Number: %s\nDate: %s\nPO: %s\nPO Date: %s",
-			invoice.InvoiceNumber,
-			invoice.InvoiceDate.Format("02-01-2006"),
-			poValue,
-			poDateValue),
-		"", "L", false)
+	drawDetailValue := func(label, value string) {
+		labelText := label + ": "
+		pdf.SetXY(detailsX, detailsY)
+		pdf.SetFont("Arial", "", 9)
+		labelWidth := pdf.GetStringWidth(labelText)
+		pdf.CellFormat(labelWidth, 5, labelText, "", 0, "", false, 0, "")
+		pdf.SetFont("Arial", "B", 9)
+		pdf.MultiCell(invoiceCol-labelWidth, 5, value, "", "L", false)
+		detailsY = pdf.GetY()
+	}
+
+	drawDetailValue("Invoice Number", invoice.InvoiceNumber)
+	drawDetailValue("Date", invoice.InvoiceDate.Format("02-01-2006"))
+	drawDetailValue("PO", poValue)
+	drawDetailValue("PO Date", poDateValue)
 
 	y3 := pdf.GetY()
 	pdf.Ln(1.5)
@@ -428,10 +468,11 @@ func buildInvoicePDF(invoice *models.Invoice, data *invoicePDFData) ([]byte, err
 	}
 
 	pdf.SetFont("Arial", "B", 9)
-	pdf.CellFormat(109, 7, "", "1", 0, "", false, 0, "")
+	pdf.SetX(leftMargin)
+	pdf.CellFormat(114, 7, "", "1", 0, "", false, 0, "")
 	pdf.CellFormat(15, 7, fmt.Sprintf("%.0f", totalQty), "1", 0, "C", false, 0, "")
 	pdf.CellFormat(35, 7, "Total Amount", "1", 0, "R", false, 0, "")
-	pdf.CellFormat(35, 7, fmt.Sprintf("%.2f", invoice.Amount), "1", 1, "R", false, 0, "")
+	pdf.CellFormat(30, 7, fmt.Sprintf("%.2f", invoice.Amount), "1", 1, "R", false, 0, "")
 
 	// ================= TERMS + GST =================
 

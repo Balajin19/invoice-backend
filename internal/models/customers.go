@@ -13,6 +13,7 @@ type CustomerAddress struct {
 // CustomerProduct represents a product associated with a customer
 type CustomerProduct struct {
 	ProductId   string  `json:"productId" db:"product_id"`
+	UnitID      string  `json:"unitId" db:"unit_id"`
 	ProductName string  `json:"productName" db:"product_name"`
 	Unit        string  `json:"unit" db:"unit"`
 	Price       float64 `json:"price" db:"price"`

@@ -3,6 +3,7 @@ package repository
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"invoice-generator-backend/config"
 	"invoice-generator-backend/internal/models"
@@ -39,6 +40,35 @@ func parseInvoiceNumber(invoiceNumber string) (string, int, error) {
 	return prefix, sequence, nil
 }
 
+func resolveInvoiceProductUnit(tx *sql.Tx, product models.InvoiceProduct) (string, error) {
+	unit := strings.TrimSpace(product.Unit)
+	productID := strings.TrimSpace(product.ProductId)
+	if productID == "" {
+		return unit, nil
+	}
+
+	var resolvedUnit string
+	err := tx.QueryRow(`
+		SELECT COALESCE(u.unit_name, '')
+		FROM products p
+		LEFT JOIN units u ON u.unit_id = p.unit_id
+		WHERE p.product_id = $1
+	`, productID).Scan(&resolvedUnit)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return unit, nil
+		}
+		return "", err
+	}
+
+	resolvedUnit = strings.TrimSpace(resolvedUnit)
+	if resolvedUnit == "" {
+		return unit, nil
+	}
+
+	return resolvedUnit, nil
+}
+
 func syncInvoiceSettingsCurrentNumber(tx *sql.Tx, userEmail, companyID, invoiceNumber string) error {
 	prefix, sequence, err := parseInvoiceNumber(invoiceNumber)
 	if err != nil {
@@ -46,7 +76,6 @@ func syncInvoiceSettingsCurrentNumber(tx *sql.Tx, userEmail, companyID, invoiceN
 	}
 
 	nullCompanyID := nullableUUID(companyID)
-
 	result, err := tx.Exec(`
 		WITH target AS (
 			SELECT id
@@ -92,7 +121,11 @@ func replaceInvoiceProducts(tx *sql.Tx, invoiceID string, products []models.Invo
 	copy(updatedProducts, products)
 
 	for i, product := range updatedProducts {
-		err := tx.QueryRow(`
+		unitValue, err := resolveInvoiceProductUnit(tx, product)
+		if err != nil {
+			return nil, err
+		}
+		err = tx.QueryRow(`
 			INSERT INTO invoice_products (invoice_id, product_id, product_name, unit, qty, price, discount, total)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 			RETURNING id
@@ -100,7 +133,7 @@ func replaceInvoiceProducts(tx *sql.Tx, invoiceID string, products []models.Invo
 			invoiceID,
 			nullableUUID(product.ProductId),
 			product.ProductName,
-			product.Unit,
+			unitValue,
 			product.Qty,
 			product.Price,
 			product.Discount,
@@ -110,6 +143,7 @@ func replaceInvoiceProducts(tx *sql.Tx, invoiceID string, products []models.Invo
 			return nil, err
 		}
 		updatedProducts[i].InvoiceId = invoiceID
+		updatedProducts[i].Unit = unitValue
 	}
 
 	return updatedProducts, nil
@@ -360,6 +394,10 @@ func CreateInvoice(userEmail string, invoice models.Invoice) (*models.Invoice, e
 	}
 
 	for i, product := range invoice.Products {
+		unitValue, err := resolveInvoiceProductUnit(tx, product)
+		if err != nil {
+			return nil, err
+		}
 		productQuery := `
 		INSERT INTO invoice_products (invoice_id, product_id, product_name, unit, qty, price, discount, total)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -369,7 +407,7 @@ func CreateInvoice(userEmail string, invoice models.Invoice) (*models.Invoice, e
 			invoice.InvoiceId,
 			nullableUUID(product.ProductId),
 			product.ProductName,
-			product.Unit,
+			unitValue,
 			product.Qty,
 			product.Price,
 			product.Discount,
@@ -379,6 +417,7 @@ func CreateInvoice(userEmail string, invoice models.Invoice) (*models.Invoice, e
 			return nil, err
 		}
 		invoice.Products[i].InvoiceId = invoice.InvoiceId
+		invoice.Products[i].Unit = unitValue
 	}
 
 	if err = syncInvoiceSettingsCurrentNumber(tx, userEmail, invoice.CompanyId, invoice.InvoiceNumber); err != nil {
