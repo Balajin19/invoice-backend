@@ -2,10 +2,34 @@ package repository
 
 import (
 	"database/sql"
+	"strings"
 
 	"invoice-generator-backend/config"
 	"invoice-generator-backend/internal/models"
 )
+
+func resolveUnitNameByID(unitID string) (string, error) {
+	trimmed := strings.TrimSpace(unitID)
+	if trimmed == "" {
+		return "", ErrUnitNotFound
+	}
+
+	var unitName string
+	err := config.DB.QueryRow(`SELECT COALESCE(unit_name, '') FROM units WHERE unit_id = $1`, trimmed).Scan(&unitName)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", ErrUnitNotFound
+		}
+		return "", err
+	}
+
+	unitName = strings.TrimSpace(unitName)
+	if unitName == "" {
+		return "", ErrUnitNotFound
+	}
+
+	return unitName, nil
+}
 
 func GetAllProducts() ([]models.Product, error) {
 	query := `
@@ -143,8 +167,13 @@ func GetProductByID(productID string) (*models.Product, error) {
 }
 
 func CreateProduct(product models.Product, actorEmail string) (*models.Product, error) {
+	unitName, err := resolveUnitNameByID(product.UnitID)
+	if err != nil {
+		return nil, err
+	}
+
 	var exists bool
-	err := config.DB.QueryRow(
+	err = config.DB.QueryRow(
 		`SELECT EXISTS (
 			SELECT 1
 			FROM products
@@ -164,13 +193,14 @@ func CreateProduct(product models.Product, actorEmail string) (*models.Product, 
 	}
 
 	query := `
-	INSERT INTO products (product_id, product_name, hsn_sac, unit_id, category_id, created_by, updated_by)
-	VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $5)
+	INSERT INTO products (product_id, product_name, hsn_sac, unit, unit_id, category_id, created_by, updated_by)
+	VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $6)
 	RETURNING product_id
 	`
 	err = config.DB.QueryRow(query,
 		product.ProductName,
 		product.HSNSAC,
+		unitName,
 		product.UnitID,
 		product.CategoryId,
 		actorEmail,
@@ -182,8 +212,13 @@ func CreateProduct(product models.Product, actorEmail string) (*models.Product, 
 }
 
 func UpdateProduct(productID string, product models.Product, actorEmail string) (*models.Product, error) {
+	unitName, err := resolveUnitNameByID(product.UnitID)
+	if err != nil {
+		return nil, err
+	}
+
 	var exists bool
-	err := config.DB.QueryRow(
+	err = config.DB.QueryRow(
 		`SELECT EXISTS (
 			SELECT 1
 			FROM products
@@ -208,14 +243,16 @@ func UpdateProduct(productID string, product models.Product, actorEmail string) 
 	UPDATE products
 	SET product_name = $1,
 	    hsn_sac      = $2,
-	    unit_id      = $3,
-	    category_id  = $4,
-	    updated_by   = $5
-	WHERE product_id = $6
+	    unit         = $3,
+	    unit_id      = $4,
+	    category_id  = $5,
+	    updated_by   = $6
+	WHERE product_id = $7
 	`
 	result, err := config.DB.Exec(query,
 		product.ProductName,
 		product.HSNSAC,
+		unitName,
 		product.UnitID,
 		product.CategoryId,
 		actorEmail,

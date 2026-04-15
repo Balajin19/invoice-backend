@@ -71,11 +71,17 @@ func CreateProduct(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		// Names come from master tables via IDs; ignore payload names/text values.
+		product.CategoryName = ""
+		product.Unit = ""
 		created, err := repository.CreateProduct(product, userEmail)
 		if err != nil {
 			if errors.Is(err, repository.ErrDuplicateProduct) {
 				logOperationError("create product duplicate name="+product.ProductName+" categoryId="+product.CategoryId, err)
 				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			} else if errors.Is(err, repository.ErrUnitNotFound) {
+				logOperationError("create product invalid unitId name="+product.ProductName+" categoryId="+product.CategoryId, err)
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			} else {
 				logOperationError("create product name="+product.ProductName+" categoryId="+product.CategoryId+" email="+userEmail, err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -105,6 +111,9 @@ func handleBulkProducts(c *gin.Context, rawData json.RawMessage, userEmail strin
 	var failedProducts []gin.H
 
 	for _, product := range products {
+		// Names come from master tables via IDs; ignore payload names/text values.
+		product.CategoryName = ""
+		product.Unit = ""
 		result, err := repository.CreateProduct(product, userEmail)
 		if err != nil {
 			logOperationError("bulk create product name="+product.ProductName+" categoryId="+product.CategoryId+" email="+userEmail, err)
@@ -128,7 +137,11 @@ func handleBulkProducts(c *gin.Context, rawData json.RawMessage, userEmail strin
 
 	if len(failedProducts) > 0 {
 		response["failures"] = failedProducts
-		c.JSON(http.StatusMultiStatus, response)
+		if len(created) == 0 {
+			c.JSON(http.StatusBadRequest, response)
+		} else {
+			c.JSON(http.StatusMultiStatus, response)
+		}
 	} else {
 		c.JSON(http.StatusCreated, response)
 	}
@@ -147,11 +160,17 @@ func UpdateProduct(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	// Names come from master tables via IDs; ignore payload names/text values.
+	product.CategoryName = ""
+	product.Unit = ""
 	updated, err := repository.UpdateProduct(productID, product, userEmail)
 	if err != nil {
 		if errors.Is(err, repository.ErrDuplicateProduct) {
 			logOperationError("update product duplicate id="+productID, err)
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		} else if errors.Is(err, repository.ErrUnitNotFound) {
+			logOperationError("update product invalid unitId id="+productID, err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		} else if errors.Is(err, sql.ErrNoRows) {
 			logOperationError("update product not found id="+productID, err)
 			c.JSON(http.StatusNotFound, gin.H{"error": "product not found"})
