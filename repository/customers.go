@@ -3,10 +3,22 @@ package repository
 import (
 	"database/sql"
 	"encoding/json"
+	"strings"
 
 	"invoice-generator-backend/config"
 	"invoice-generator-backend/internal/models"
 )
+
+func joinCustomerAddress(parts ...string) string {
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			filtered = append(filtered, trimmed)
+		}
+	}
+	return strings.Join(filtered, ", ")
+}
 
 func replaceCustomerProducts(tx *sql.Tx, customerID string, products []models.CustomerProduct) error {
 	if _, err := tx.Exec(`DELETE FROM customer_products WHERE customer_id = $1`, customerID); err != nil {
@@ -311,6 +323,29 @@ func UpdateCustomer(customerId string, customer models.Customer) (*models.Custom
 	}
 
 	if err := replaceCustomerProducts(tx, customerId, customer.Products); err != nil {
+		return nil, err
+	}
+
+	street := ""
+	if customer.Address.Street != nil {
+		street = *customer.Address.Street
+	}
+	invoiceAddress := joinCustomerAddress(
+		customer.Address.BuildingNo,
+		street,
+		customer.Address.City,
+		customer.Address.District,
+		customer.Address.State,
+		customer.Address.Pincode,
+	)
+
+	if _, err := tx.Exec(`
+		UPDATE invoices
+		SET customer_name = $1,
+		    customer_address = $2,
+		    gstin = $3
+		WHERE customer_id = $4
+	`, customer.CustomerName, invoiceAddress, customer.GSTIN, customerId); err != nil {
 		return nil, err
 	}
 

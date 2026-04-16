@@ -217,8 +217,14 @@ func UpdateProduct(productID string, product models.Product, actorEmail string) 
 		return nil, err
 	}
 
+	tx, err := config.DB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
 	var exists bool
-	err = config.DB.QueryRow(
+	err = tx.QueryRow(
 		`SELECT EXISTS (
 			SELECT 1
 			FROM products
@@ -249,7 +255,7 @@ func UpdateProduct(productID string, product models.Product, actorEmail string) 
 	    updated_by   = $6
 	WHERE product_id = $7
 	`
-	result, err := config.DB.Exec(query,
+	result, err := tx.Exec(query,
 		product.ProductName,
 		product.HSNSAC,
 		unitName,
@@ -268,6 +274,28 @@ func UpdateProduct(productID string, product models.Product, actorEmail string) 
 	if rowsAffected == 0 {
 		return nil, sql.ErrNoRows
 	}
+
+	if _, err = tx.Exec(`
+		UPDATE invoice_products
+		SET product_name = $1,
+		    unit = $2
+		WHERE product_id = $3
+	`, product.ProductName, unitName, productID); err != nil {
+		return nil, err
+	}
+
+	if _, err = tx.Exec(`
+		UPDATE customer_products
+		SET unit_id = $1
+		WHERE product_id = $2
+	`, product.UnitID, productID); err != nil {
+		return nil, err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+
 	return GetProductByID(productID)
 }
 

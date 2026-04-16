@@ -229,11 +229,35 @@ func BuildInvoicePDF(c *gin.Context) {
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 	c.Data(http.StatusOK, "application/pdf", pdfBytes)
 }
+func drawProductTableHeader(pdf *fpdf.Fpdf, widths []float64) {
+	headers := []string{"S.No", "Description of Products", "HSN", "Unit", "Qty", "Rate", "Disc%", "Amount"}
+
+	pdf.SetFont("Arial", "B", 9)
+	for i, h := range headers {
+		pdf.CellFormat(widths[i], 7, h, "1", 0, "C", false, 0, "")
+	}
+	pdf.Ln(-1)
+
+	pdf.SetFont("Arial", "", 9)
+}
+
+func moveToBottomIfLastPage(pdf *fpdf.Fpdf, requiredHeight float64) {
+	pageHeight, _ := pdf.GetPageSize()
+	bottomMargin := 8.0
+
+	currentY := pdf.GetY()
+	remaining := pageHeight - bottomMargin - currentY
+
+	if remaining > requiredHeight {
+		pdf.SetY(pageHeight - bottomMargin - requiredHeight)
+	}
+}
 
 func buildInvoicePDF(invoice *models.Invoice, data *invoicePDFData) ([]byte, error) {
 
 	pdf := fpdf.New("P", "mm", "A4", "")
 	pdf.SetMargins(8, 8, 8)
+	pdf.SetAutoPageBreak(false, 0)
 	pdf.AddPage()
 
 	pageWidth, _ := pdf.GetPageSize()
@@ -395,95 +419,133 @@ func buildInvoicePDF(invoice *models.Invoice, data *invoicePDFData) ([]byte, err
 	pdf.SetY(maxY)
 
 	// ================= PRODUCTS =================
+widths := []float64{10, 59, 30, 15, 15, 20, 15, 30}
 
-	headers := []string{"S.No", "Description of Products", "HSN", "Unit", "Qty", "Rate", "Disc%", "Amount"}
-	widths := []float64{10, 59, 30, 15, 15, 20, 15, 30}
+drawProductTableHeader(pdf, widths)
 
-	pdf.SetFont("Arial", "B", 9)
-	for i, h := range headers {
-		pdf.CellFormat(widths[i], 7, h, "1", 0, "C", false, 0, "")
-	}
-	pdf.Ln(-1)
+var totalQty float64
+lineHeight := 6.0
+leftMargin := 8.0
+totalRowHeight := 7.0
 
-	pdf.SetFont("Arial", "", 9)
+pageHeight, _ := pdf.GetPageSize()
+bottomMargin := 8.0
 
-	var totalQty float64
-	lineHeight := 6.0
-	leftMargin := 8.0
+// ---- PRODUCT LOOP ----
+for i, p := range invoice.Products {
 
-	for i, p := range invoice.Products {
-		totalQty += p.Qty
-		description := strings.TrimSpace(strings.ReplaceAll(p.ProductName, "\n", " "))
+	totalQty += p.Qty
 
-		// Calculate product name lines and row height
-		productLines := pdf.SplitLines([]byte(description), widths[1])
-		rowHeight := float64(len(productLines)) * lineHeight
-		if rowHeight < 6 {
-			rowHeight = 6
-		}
+	description := strings.TrimSpace(strings.ReplaceAll(p.ProductName, "\n", " "))
+	productLines := pdf.SplitLines([]byte(description), widths[1])
 
-		rowStartX := leftMargin
-		rowStartY := pdf.GetY()
-
-		// S.No - single line, centered vertically
-		pdf.SetXY(rowStartX, rowStartY)
-		pdf.CellFormat(widths[0], rowHeight, fmt.Sprintf("%d", i+1), "1", 0, "CM", false, 0, "")
-
-		// Description - wrapped text with MultiCell
-		pdf.SetXY(rowStartX+widths[0], rowStartY)
-		pdf.MultiCell(widths[1], lineHeight, description, "1", "L", false)
-
-		// Position remaining cells in the row
-		currentX := rowStartX + widths[0] + widths[1]
-
-		// HSN
-		pdf.SetXY(currentX, rowStartY)
-		pdf.CellFormat(widths[2], rowHeight, p.HSN, "1", 0, "", false, 0, "")
-		currentX += widths[2]
-
-		// Unit
-		pdf.SetXY(currentX, rowStartY)
-		pdf.CellFormat(widths[3], rowHeight, p.Unit, "1", 0, "C", false, 0, "")
-		currentX += widths[3]
-
-		// Qty
-		pdf.SetXY(currentX, rowStartY)
-		pdf.CellFormat(widths[4], rowHeight, fmt.Sprintf("%.0f", p.Qty), "1", 0, "C", false, 0, "")
-		currentX += widths[4]
-
-		// Rate
-		pdf.SetXY(currentX, rowStartY)
-		pdf.CellFormat(widths[5], rowHeight, fmt.Sprintf("%.2f", p.Price), "1", 0, "R", false, 0, "")
-		currentX += widths[5]
-
-		// Disc%
-		pdf.SetXY(currentX, rowStartY)
-		discountText := fmt.Sprintf("%.2f", p.Discount)
-		pdf.CellFormat(widths[6], rowHeight, discountText, "1", 0, "C", false, 0, "")
-		currentX += widths[6]
-
-		// Amount - last cell with ln=1 to move to next row
-		pdf.SetXY(currentX, rowStartY)
-		pdf.CellFormat(widths[7], rowHeight, fmt.Sprintf("%.2f", p.Total), "1", 1, "R", false, 0, "")
+	rowHeight := float64(len(productLines)) * lineHeight
+	if rowHeight < 6 {
+		rowHeight = 6
 	}
 
-	pdf.SetFont("Arial", "B", 9)
-	pdf.SetX(leftMargin)
-	pdf.CellFormat(114, 7, "", "1", 0, "", false, 0, "")
-	pdf.CellFormat(15, 7, fmt.Sprintf("%.0f", totalQty), "1", 0, "C", false, 0, "")
-	pdf.CellFormat(35, 7, "Total Amount", "1", 0, "R", false, 0, "")
-	pdf.CellFormat(30, 7, fmt.Sprintf("%.2f", invoice.Amount), "1", 1, "R", false, 0, "")
+	if pdf.GetY()+rowHeight > pageHeight-bottomMargin {
+		pdf.AddPage()
+		drawProductTableHeader(pdf, widths)
+	}
 
+	rowStartX := leftMargin
+	rowStartY := pdf.GetY()
+
+	// S.No
+	pdf.SetXY(rowStartX, rowStartY)
+	pdf.CellFormat(widths[0], rowHeight, fmt.Sprintf("%d", i+1), "1", 0, "CM", false, 0, "")
+
+	// Description
+	pdf.SetXY(rowStartX+widths[0], rowStartY)
+	pdf.MultiCell(widths[1], lineHeight, description, "1", "L", false)
+
+	currentX := rowStartX + widths[0] + widths[1]
+
+	// HSN
+	pdf.SetXY(currentX, rowStartY)
+	pdf.CellFormat(widths[2], rowHeight, p.HSN, "1", 0, "", false, 0, "")
+	currentX += widths[2]
+
+	// Unit
+	pdf.SetXY(currentX, rowStartY)
+	pdf.CellFormat(widths[3], rowHeight, p.Unit, "1", 0, "C", false, 0, "")
+	currentX += widths[3]
+
+	// Qty
+	pdf.SetXY(currentX, rowStartY)
+	pdf.CellFormat(widths[4], rowHeight, fmt.Sprintf("%.0f", p.Qty), "1", 0, "C", false, 0, "")
+	currentX += widths[4]
+
+	// Rate
+	pdf.SetXY(currentX, rowStartY)
+	pdf.CellFormat(widths[5], rowHeight, fmt.Sprintf("%.2f", p.Price), "1", 0, "R", false, 0, "")
+	currentX += widths[5]
+
+	// Disc%
+	pdf.SetXY(currentX, rowStartY)
+	pdf.CellFormat(widths[6], rowHeight, fmt.Sprintf("%.2f", p.Discount), "1", 0, "C", false, 0, "")
+	currentX += widths[6]
+
+	// Amount
+	pdf.SetXY(currentX, rowStartY)
+	pdf.CellFormat(widths[7], rowHeight, fmt.Sprintf("%.2f", p.Total), "1", 1, "R", false, 0, "")
+}
+
+// ---- TOTAL ROW ----
+if pdf.GetY()+totalRowHeight > pageHeight-bottomMargin {
+	pdf.AddPage()
+	drawProductTableHeader(pdf, widths)
+}
+
+pdf.SetFont("Arial", "B", 9)
+pdf.SetX(leftMargin)
+pdf.CellFormat(114, totalRowHeight, "", "1", 0, "", false, 0, "")
+pdf.CellFormat(15, totalRowHeight, fmt.Sprintf("%.0f", totalQty), "1", 0, "C", false, 0, "")
+pdf.CellFormat(35, totalRowHeight, "Total Amount", "1", 0, "R", false, 0, "")
+pdf.CellFormat(30, totalRowHeight, fmt.Sprintf("%.2f", invoice.Amount), "1", 1, "R", false, 0, "")
+
+pageHeight, _ = pdf.GetPageSize()
+bottomMargin = 8.0
+
+termsLines := pdf.SplitLines([]byte(data.Terms), 92)
+termsHeight := float64(len(termsLines))*5.5 + 11
+gstHeight := 6.0 * 7.0
+boxHeight := termsHeight
+if gstHeight > boxHeight {
+	boxHeight = gstHeight
+}
+
+// Amount words
+footerAmountWordsText := "Amount in Words: " + invoice.TotalInWords
+footerAmountLines := pdf.SplitLines([]byte(footerAmountWordsText), contentWidth-2)
+footerAmountHeight := 7.0
+if len(footerAmountLines) > 1 {
+	footerAmountHeight = float64(len(footerAmountLines)) * 5.5
+}
+
+// Bank
+footerBankHeight := float64(6+len([]string{
+	"Account Name", "Account Number", "Bank Name", "Branch", "IFSC", "UPI",
+})) * 5.5 + 7
+
+// TOTAL FOOTER HEIGHT
+footerHeight := boxHeight + footerAmountHeight + footerBankHeight + 6
+
+// ✅ SINGLE PAGE BREAK DECISION
+if pdf.GetY()+footerHeight > pageHeight-bottomMargin {
+	pdf.AddPage()
+}
 	// ================= TERMS + GST =================
 
 	y := pdf.GetY()
 
-	termsLines := pdf.SplitLines([]byte(data.Terms), 92)
-	termsHeight := float64(len(termsLines))*5.5 + 11
+	termsLines = pdf.SplitLines([]byte(data.Terms), 92)
+	termsHeight = float64(len(termsLines))*5.5 + 11
 
-	gstHeight := 6.0 * 7.0
+	gstHeight = 6.0 * 7.0
 
-	boxHeight := termsHeight
+	boxHeight = termsHeight
 	if gstHeight > boxHeight {
 		boxHeight = gstHeight
 	}
@@ -547,6 +609,7 @@ func buildInvoicePDF(invoice *models.Invoice, data *invoicePDFData) ([]byte, err
 
 	amountWordsText := "Amount in Words: " + invoice.TotalInWords
 	amountWordsLines := pdf.SplitLines([]byte(amountWordsText), contentWidth-2)
+
 	if len(amountWordsLines) <= 1 {
 		pdf.CellFormat(contentWidth, 7, amountWordsText, "1", 1, "", false, 0, "")
 	} else {
@@ -570,6 +633,11 @@ func buildInvoicePDF(invoice *models.Invoice, data *invoicePDFData) ([]byte, err
 	}
 
 	bankHeight := float64(len(bankRows)+1)*5.5 + 7
+
+	// if pdf.GetY()+bankHeight > pageHeight-bottomMargin {
+	// 	pdf.AddPage()
+	// 	y = pdf.GetY()
+	// }
 
 	pdf.Rect(8, y, 97, bankHeight, "D")
 
