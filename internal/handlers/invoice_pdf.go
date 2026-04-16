@@ -532,7 +532,7 @@ footerBankHeight := float64(6+len([]string{
 // TOTAL FOOTER HEIGHT
 footerHeight := boxHeight + footerAmountHeight + footerBankHeight + 6
 
-// ✅ SINGLE PAGE BREAK DECISION
+// SINGLE PAGE BREAK DECISION
 if pdf.GetY()+footerHeight > pageHeight-bottomMargin {
 	pdf.AddPage()
 }
@@ -633,11 +633,6 @@ if pdf.GetY()+footerHeight > pageHeight-bottomMargin {
 	}
 
 	bankHeight := float64(len(bankRows)+1)*5.5 + 7
-
-	// if pdf.GetY()+bankHeight > pageHeight-bottomMargin {
-	// 	pdf.AddPage()
-	// 	y = pdf.GetY()
-	// }
 
 	pdf.Rect(8, y, 97, bankHeight, "D")
 
