@@ -15,8 +15,12 @@ type CustomerProduct struct {
 	ProductId   string  `json:"productId" db:"product_id"`
 	UnitID      string  `json:"unitId" db:"unit_id"`
 	ProductName string  `json:"productName" db:"product_name"`
+	HSNSAC      string  `json:"hsnSac" db:"hsn_sac"`
 	Unit        string  `json:"unit" db:"unit"`
 	Price       float64 `json:"price" db:"price"`
+	CGSTRate    float64 `json:"cgstRate" db:"cgst_rate"`
+	SGSTRate    float64 `json:"sgstRate" db:"sgst_rate"`
+	IGSTRate    float64 `json:"igstRate" db:"igst_rate"`
 }
 
 // Customer represents a customer in the system

@@ -27,6 +27,7 @@ type invoicePayload struct {
 	GSTIN         string                `json:"gstIn"`
 	PaymentTerms  string                `json:"paymentTerms"`
 	Amount        float64               `json:"subTotal"`
+	OverallDiscount float64             `json:"overallDiscount"`
 	CGST          float64               `json:"cgst"`
 	SGST          float64               `json:"sgst"`
 	IGST          float64               `json:"igst"`
@@ -109,6 +110,7 @@ func toInvoiceModel(payload invoicePayload) (models.Invoice, error) {
 		GSTIN:         payload.GSTIN,
 		PaymentTerms:  payload.PaymentTerms,
 		Amount:        payload.Amount,
+		OverallDiscount: payload.OverallDiscount,
 		CGST:          payload.CGST,
 		SGST:          payload.SGST,
 		IGST:          payload.IGST,

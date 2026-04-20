@@ -63,6 +63,25 @@ func companyField(company *models.Companies, getter func(*models.Companies) stri
 	return getter(company)
 }
 
+func companyContactInfo(company *models.Companies) string {
+	if company == nil {
+		return ""
+	}
+
+	contactInfo := ""
+	if strings.TrimSpace(company.Email) != "" {
+		contactInfo = "Email: " + strings.TrimSpace(company.Email)
+	}
+	if strings.TrimSpace(company.Website) != "" {
+		if contactInfo != "" {
+			contactInfo += " | "
+		}
+		contactInfo += "Website: " + strings.TrimSpace(company.Website)
+	}
+
+	return contactInfo
+}
+
 func bankField(bank *models.Banks, getter func(*models.Banks) string) string {
 	if bank == nil {
 		return ""
@@ -195,6 +214,7 @@ func buildInvoicePDFData(userEmail string, invoice *models.Invoice) (*invoicePDF
 
 func BuildInvoicePDF(c *gin.Context) {
 	invoiceID := c.Param("id")
+	orientation := parsePDFOrientation(c.Query("orientation"))
 	userEmail, ok := userEmail(c)
 	if !ok {
 		return
@@ -216,7 +236,7 @@ func BuildInvoicePDF(c *gin.Context) {
 		return
 	}
 
-	pdfBytes, err := buildInvoicePDF(invoice, pdfData)
+	pdfBytes, err := buildInvoicePDF(invoice, pdfData, orientation)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -229,8 +249,9 @@ func BuildInvoicePDF(c *gin.Context) {
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 	c.Data(http.StatusOK, "application/pdf", pdfBytes)
 }
+
 func drawProductTableHeader(pdf *fpdf.Fpdf, widths []float64) {
-	headers := []string{"S.No", "Description of Products", "HSN", "Unit", "Qty", "Rate", "Disc%", "Amount"}
+	headers := []string{"S.No", "Description of Products", "HSN/SAC", "Unit", "Qty", "Rate", "Disc%", "Amount", "CGST%", "SGST%", "IGST%"}
 
 	pdf.SetFont("Arial", "B", 9)
 	for i, h := range headers {
@@ -241,27 +262,52 @@ func drawProductTableHeader(pdf *fpdf.Fpdf, widths []float64) {
 	pdf.SetFont("Arial", "", 9)
 }
 
-func moveToBottomIfLastPage(pdf *fpdf.Fpdf, requiredHeight float64) {
-	pageHeight, _ := pdf.GetPageSize()
-	bottomMargin := 8.0
-
-	currentY := pdf.GetY()
-	remaining := pageHeight - bottomMargin - currentY
-
-	if remaining > requiredHeight {
-		pdf.SetY(pageHeight - bottomMargin - requiredHeight)
+func parsePDFOrientation(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "l", "landscape", "horizontal":
+		return "L"
+	default:
+		return "P"
 	}
 }
 
-func buildInvoicePDF(invoice *models.Invoice, data *invoicePDFData) ([]byte, error) {
+func scaleWidthsToContent(base []float64, targetTotal float64) []float64 {
+	scaled := make([]float64, len(base))
+	if len(base) == 0 {
+		return scaled
+	}
 
-	pdf := fpdf.New("P", "mm", "A4", "")
+	baseTotal := 0.0
+	for _, w := range base {
+		baseTotal += w
+	}
+	if baseTotal <= 0 {
+		copy(scaled, base)
+		return scaled
+	}
+
+	factor := targetTotal / baseTotal
+	sumScaled := 0.0
+	for i, w := range base {
+		scaled[i] = w * factor
+		sumScaled += scaled[i]
+	}
+
+	// Keep exact total width to avoid overflow from floating-point drift.
+	scaled[len(scaled)-1] += targetTotal - sumScaled
+	return scaled
+}
+
+func buildInvoicePDF(invoice *models.Invoice, data *invoicePDFData, orientation string) ([]byte, error) {
+
+	pdf := fpdf.New(orientation, "mm", "A4", "")
 	pdf.SetMargins(8, 8, 8)
 	pdf.SetAutoPageBreak(false, 0)
 	pdf.AddPage()
 
 	pageWidth, _ := pdf.GetPageSize()
 	contentWidth := pageWidth - 16
+	isLandscape := strings.EqualFold(orientation, "L")
 
 	// ================= HEADER =================
 
@@ -278,6 +324,7 @@ func buildInvoicePDF(invoice *models.Invoice, data *invoicePDFData) ([]byte, err
 		firstNonEmpty(companyField(data.Company, func(company *models.Companies) string { return company.MobileNumber }), "-"))
 
 	addressText := data.CompanyAddress
+	contactText := companyContactInfo(data.Company)
 	addressWidth := 110.0
 	addressX := (pageWidth - addressWidth) / 2
 	companyNameTop := headerTop + 3
@@ -285,19 +332,29 @@ func buildInvoicePDF(invoice *models.Invoice, data *invoicePDFData) ([]byte, err
 
 	leftLineHeight := 4.5
 	addressLineHeight := 4.5
+	contactLineHeight := 3.5
 	topPadding := 2.5
 	bottomPadding := 2.5
 
 	leftLines := pdf.SplitLines([]byte(leftText), 60)
 	addrLines := pdf.SplitLines([]byte(addressText), addressWidth)
+	contactLines := pdf.SplitLines([]byte(contactText), addressWidth)
 
 	leftBottom := headerTop + topPadding + float64(len(leftLines))*leftLineHeight
 	addressBottom := addressTop + float64(len(addrLines))*addressLineHeight
+	contactTop := addressBottom + 1.0
+	contactBottom := addressBottom
+	if strings.TrimSpace(contactText) != "" {
+		contactBottom = contactTop + float64(len(contactLines))*contactLineHeight
+	}
 	logoBottom := headerTop + 2 + 10 // approximate logo visual footprint for box fitting
 
 	headerBottom := leftBottom
 	if addressBottom > headerBottom {
 		headerBottom = addressBottom
+	}
+	if contactBottom > headerBottom {
+		headerBottom = contactBottom
 	}
 	if logoBottom > headerBottom {
 		headerBottom = logoBottom
@@ -322,9 +379,15 @@ func buildInvoicePDF(invoice *models.Invoice, data *invoicePDFData) ([]byte, err
 	pdf.SetFont("Arial", "", 9)
 	pdf.MultiCell(addressWidth, 4.5, addressText, "", "C", false)
 
+	if strings.TrimSpace(contactText) != "" {
+		pdf.SetXY(addressX, contactTop)
+		pdf.SetFont("Arial", "", 8)
+		pdf.MultiCell(addressWidth, contactLineHeight, contactText, "", "C", false)
+	}
+
 	// Logo
 	if data.LogoPath != "" {
-		pdf.Image(data.LogoPath, pageWidth-33, headerTop+3.5, 25, 0, false, "", 0, "")
+		pdf.Image(data.LogoPath, pageWidth-36, headerTop+3.5, 28, 0, false, "", 0, "")
 	}
 
 	pdf.SetY(headerTop + headerHeight)
@@ -419,32 +482,111 @@ func buildInvoicePDF(invoice *models.Invoice, data *invoicePDFData) ([]byte, err
 	pdf.SetY(maxY)
 
 	// ================= PRODUCTS =================
-widths := []float64{10, 59, 30, 15, 15, 20, 15, 30}
+	widths := []float64{9, 49, 19, 12, 13, 18, 12, 23, 13, 13, 13}
+	if isLandscape {
+		widths = scaleWidthsToContent(widths, contentWidth)
+	}
 
 drawProductTableHeader(pdf, widths)
 
 var totalQty float64
-lineHeight := 6.0
+var lineHeight float64 = 7.5
+var multiLineHeight float64 = 6.0
 leftMargin := 8.0
 totalRowHeight := 7.0
 
 pageHeight, _ := pdf.GetPageSize()
 bottomMargin := 8.0
 
+descriptions := make([]string, len(invoice.Products))
+lineCounts := make([]int, len(invoice.Products))
+rowHeights := make([]float64, len(invoice.Products))
+
+for i, p := range invoice.Products {
+	description := strings.TrimSpace(strings.ReplaceAll(p.ProductName, "\n", " "))
+	if description == "" {
+		description = "-"
+	}
+	productLines := pdf.SplitLines([]byte(description), widths[1])
+	lineCount := len(productLines)
+	if lineCount == 0 {
+		lineCount = 1
+	}
+	lineUnitHeight := lineHeight
+	if lineCount > 1 {
+		lineUnitHeight = multiLineHeight
+	}
+	rowHeight := float64(lineCount) * lineUnitHeight
+	if rowHeight < 6 {
+		rowHeight = 6
+	}
+
+	descriptions[i] = description
+	lineCounts[i] = lineCount
+	rowHeights[i] = rowHeight
+}
+
+remainingRowHeights := make([]float64, len(rowHeights)+1)
+for i := len(rowHeights) - 1; i >= 0; i-- {
+	remainingRowHeights[i] = remainingRowHeights[i+1] + rowHeights[i]
+}
+
+landscapeFooterReserve := 0.0
+if isLandscape {
+	termsWForFooter := contentWidth / 2
+	termsTextWidthForFooter := termsWForFooter - 5
+
+	termsLinesForFooter := pdf.SplitLines([]byte(data.Terms), termsTextWidthForFooter)
+	termsHeightForFooter := float64(len(termsLinesForFooter))*5.5 + 11
+	boxHeightForFooter := termsHeightForFooter
+	if 7.0*7.0 > boxHeightForFooter {
+		boxHeightForFooter = 7.0 * 7.0
+	}
+
+	amountWordsLabelForFooter := "Amount in Words: "
+	amountWordsValueForFooter := strings.TrimSpace(invoice.TotalInWords)
+	if amountWordsValueForFooter == "" {
+		amountWordsValueForFooter = "-"
+	}
+	amountWordsTextForFooter := amountWordsLabelForFooter + amountWordsValueForFooter
+	amountWordsLinesForFooter := pdf.SplitLines([]byte(amountWordsTextForFooter), contentWidth-2)
+	amountWordsHeightForFooter := 7.0
+	if len(amountWordsLinesForFooter) > 1 {
+		amountWordsHeightForFooter = float64(len(amountWordsLinesForFooter)) * 5.5
+	}
+
+	bankRowsCountForFooter := 5
+	upiValueForFooter := strings.TrimSpace(bankField(data.Bank, func(bank *models.Banks) string { return bank.UPI }))
+	if upiValueForFooter != "" {
+		bankRowsCountForFooter++
+	}
+	bankHeightForFooter := float64(bankRowsCountForFooter+1)*5.5 + 7
+
+	landscapeFooterGap := 10.0
+	landscapeFooterReserve = boxHeightForFooter + amountWordsHeightForFooter + bankHeightForFooter + landscapeFooterGap
+}
+
 // ---- PRODUCT LOOP ----
 for i, p := range invoice.Products {
 
 	totalQty += p.Qty
 
-	description := strings.TrimSpace(strings.ReplaceAll(p.ProductName, "\n", " "))
-	productLines := pdf.SplitLines([]byte(description), widths[1])
+	description := descriptions[i]
+	rowHeight := rowHeights[i]
+	descLineHeight := rowHeight / float64(lineCounts[i])
 
-	rowHeight := float64(len(productLines)) * lineHeight
-	if rowHeight < 6 {
-		rowHeight = 6
+	// Keep product rows visible and reserve footer space on the last product page.
+	breakLimit := pageHeight - bottomMargin
+	rowRequiredHeight := rowHeight
+	if isLandscape {
+		remainingWithTotal := remainingRowHeights[i] + totalRowHeight
+		if pdf.GetY()+remainingWithTotal <= pageHeight-bottomMargin {
+			breakLimit = pageHeight - bottomMargin - landscapeFooterReserve
+			rowRequiredHeight = rowHeight + totalRowHeight
+		}
 	}
 
-	if pdf.GetY()+rowHeight > pageHeight-bottomMargin {
+	if pdf.GetY()+rowRequiredHeight > breakLimit {
 		pdf.AddPage()
 		drawProductTableHeader(pdf, widths)
 	}
@@ -458,7 +600,7 @@ for i, p := range invoice.Products {
 
 	// Description
 	pdf.SetXY(rowStartX+widths[0], rowStartY)
-	pdf.MultiCell(widths[1], lineHeight, description, "1", "L", false)
+	pdf.MultiCell(widths[1], descLineHeight, description, "1", "L", false)
 
 	currentX := rowStartX + widths[0] + widths[1]
 
@@ -489,112 +631,170 @@ for i, p := range invoice.Products {
 
 	// Amount
 	pdf.SetXY(currentX, rowStartY)
-	pdf.CellFormat(widths[7], rowHeight, fmt.Sprintf("%.2f", p.Total), "1", 1, "R", false, 0, "")
+	pdf.CellFormat(widths[7], rowHeight, fmt.Sprintf("%.2f", p.Total), "1", 0, "R", false, 0, "")
+	currentX += widths[7]
+
+	// CGST%
+	pdf.SetXY(currentX, rowStartY)
+	pdf.CellFormat(widths[8], rowHeight, fmt.Sprintf("%.2f", p.CGSTRate), "1", 0, "C", false, 0, "")
+	currentX += widths[8]
+
+	// SGST%
+	pdf.SetXY(currentX, rowStartY)
+	pdf.CellFormat(widths[9], rowHeight, fmt.Sprintf("%.2f", p.SGSTRate), "1", 0, "C", false, 0, "")
+	currentX += widths[9]
+
+	// IGST%
+	pdf.SetXY(currentX, rowStartY)
+	pdf.CellFormat(widths[10], rowHeight, fmt.Sprintf("%.2f", p.IGSTRate), "1", 1, "C", false, 0, "")
 }
 
 // ---- TOTAL ROW ----
-if pdf.GetY()+totalRowHeight > pageHeight-bottomMargin {
+totalBreakLimit := pageHeight - bottomMargin
+if isLandscape {
+	totalBreakLimit = pageHeight - bottomMargin - landscapeFooterReserve
+}
+
+if pdf.GetY()+totalRowHeight > totalBreakLimit {
 	pdf.AddPage()
 	drawProductTableHeader(pdf, widths)
 }
 
 pdf.SetFont("Arial", "B", 9)
 pdf.SetX(leftMargin)
-pdf.CellFormat(114, totalRowHeight, "", "1", 0, "", false, 0, "")
-pdf.CellFormat(15, totalRowHeight, fmt.Sprintf("%.0f", totalQty), "1", 0, "C", false, 0, "")
-pdf.CellFormat(35, totalRowHeight, "Total Amount", "1", 0, "R", false, 0, "")
-pdf.CellFormat(30, totalRowHeight, fmt.Sprintf("%.2f", invoice.Amount), "1", 1, "R", false, 0, "")
+// Empty cells for S.No through Unit
+emptyWidth := widths[0] + widths[1] + widths[2] + widths[3]
+pdf.CellFormat(emptyWidth, totalRowHeight, "", "1", 0, "", false, 0, "")
+pdf.CellFormat(widths[4], totalRowHeight, fmt.Sprintf("%.0f", totalQty), "1", 0, "C", false, 0, "")
+pdf.CellFormat(widths[5]+widths[6], totalRowHeight, "Total Amount", "1", 0, "R", false, 0, "")
+pdf.CellFormat(widths[7], totalRowHeight, fmt.Sprintf("%.2f", invoice.Amount), "1", 0, "R", false, 0, "")
+emptyTaxWidth := widths[8] + widths[9] + widths[10]
+pdf.CellFormat(emptyTaxWidth, totalRowHeight, "", "1", 1, "", false, 0, "")
 
 pageHeight, _ = pdf.GetPageSize()
 bottomMargin = 8.0
 
-termsLines := pdf.SplitLines([]byte(data.Terms), 92)
+termsX := 8.0
+termsW := 97.0
+gstX := 105.0
+gstW := 97.0
+if isLandscape {
+	termsW = contentWidth / 2
+	gstW = contentWidth - termsW
+	gstX = termsX + termsW
+}
+
+termsTextWidth := 92.0
+if isLandscape {
+	termsTextWidth = termsW - 5
+}
+
+upiValue := strings.TrimSpace(bankField(data.Bank, func(bank *models.Banks) string { return bank.UPI }))
+
+bankRows := []struct {
+	label string
+	value string
+}{
+	{"Account Name", bankField(data.Bank, func(bank *models.Banks) string { return bank.AccountName })},
+	{"Account Number", bankField(data.Bank, func(bank *models.Banks) string { return bank.AccountNumber })},
+	{"Bank Name", bankField(data.Bank, func(bank *models.Banks) string { return bank.BankName })},
+	{"Branch", bankField(data.Bank, func(bank *models.Banks) string { return bank.BranchName })},
+	{"IFSC", bankField(data.Bank, func(bank *models.Banks) string { return bank.IFSC })},
+}
+if upiValue != "" {
+	bankRows = append(bankRows, struct {
+		label string
+		value string
+	}{"UPI", upiValue})
+}
+
+bankHeight := float64(len(bankRows)+1)*5.5 + 7
+
+termsLines := pdf.SplitLines([]byte(data.Terms), termsTextWidth)
 termsHeight := float64(len(termsLines))*5.5 + 11
-gstHeight := 6.0 * 7.0
+gstHeight := 7.0 * 7.0
 boxHeight := termsHeight
 if gstHeight > boxHeight {
 	boxHeight = gstHeight
 }
 
-// Amount words
-footerAmountWordsText := "Amount in Words: " + invoice.TotalInWords
-footerAmountLines := pdf.SplitLines([]byte(footerAmountWordsText), contentWidth-2)
-footerAmountHeight := 7.0
-if len(footerAmountLines) > 1 {
-	footerAmountHeight = float64(len(footerAmountLines)) * 5.5
+amountWordsLabel := "Amount in Words: "
+amountWordsValue := strings.TrimSpace(invoice.TotalInWords)
+if amountWordsValue == "" {
+	amountWordsValue = "-"
+}
+amountWordsText := amountWordsLabel + amountWordsValue
+amountWordsLines := pdf.SplitLines([]byte(amountWordsText), contentWidth-2)
+amountWordsHeight := 7.0
+if len(amountWordsLines) > 1 {
+	amountWordsHeight = float64(len(amountWordsLines)) * 5.5
 }
 
-// Bank
-footerBankHeight := float64(6+len([]string{
-	"Account Name", "Account Number", "Bank Name", "Branch", "IFSC", "UPI",
-})) * 5.5 + 7
-
-// TOTAL FOOTER HEIGHT
-footerHeight := boxHeight + footerAmountHeight + footerBankHeight + 6
-
-// SINGLE PAGE BREAK DECISION
-if pdf.GetY()+footerHeight > pageHeight-bottomMargin {
+// Use available space for each footer section in both orientations.
+if pdf.GetY()+boxHeight > pageHeight-bottomMargin {
 	pdf.AddPage()
 }
 	// ================= TERMS + GST =================
 
 	y := pdf.GetY()
 
-	termsLines = pdf.SplitLines([]byte(data.Terms), 92)
+	termsLines = pdf.SplitLines([]byte(data.Terms), termsTextWidth)
 	termsHeight = float64(len(termsLines))*5.5 + 11
 
-	gstHeight = 6.0 * 7.0
+	gstHeight = 7.0 * 7.0
 
 	boxHeight = termsHeight
 	if gstHeight > boxHeight {
 		boxHeight = gstHeight
 	}
 
-	pdf.Rect(8, y, 97, boxHeight, "D")
-	pdf.SetXY(10, y+2)
+	pdf.Rect(termsX, y, termsW, boxHeight, "D")
+	pdf.SetXY(termsX+2, y+2)
 
 	pdf.SetFont("Arial", "B", 10)
-	pdf.Cell(92, 6, "Terms & Conditions:")
+	pdf.Cell(termsTextWidth, 6, "Terms & Conditions:")
 	pdf.Ln(6)
 
 	pdf.SetFont("Arial", "", 10)
-	pdf.MultiCell(92, 5.5, data.Terms, "", "L", false)
+	pdf.MultiCell(termsTextWidth, 5.5, data.Terms, "", "L", false)
 
-	pdf.Rect(105, y, 97, boxHeight, "D")
+	pdf.Rect(gstX, y, gstW, boxHeight, "D")
 
 	labelW := 47.0
 	valueW := 50.0
+	if isLandscape {
+		labelW = gstW * 0.4845
+		valueW = gstW - labelW
+	}
 
 	rows := []struct {
 		label string
 		value float64
 	}{
-		{"CGST 9%", invoice.CGST},
-		{"SGST 9%", invoice.SGST},
+		{"Overall Discount", invoice.OverallDiscount},
+		{"CGST", invoice.CGST},
+		{"SGST", invoice.SGST},
 		{"IGST", invoice.IGST},
-		{"Rounded Off", invoice.RoundedOff},
 		{"Total Tax", invoice.TotalTax},
+		{"Rounded Off", invoice.RoundedOff},
 		{"Gross Total", invoice.Total},
 	}
 
-	pdf.SetXY(105, y)
+	pdf.SetXY(gstX, y)
 
 	for _, r := range rows {
-		isGrossTotal := r.label == "Gross Total"
-		isTotalTax := r.label == "Total Tax"
+		isBold := r.label == "Gross Total" || r.label == "Total Tax" || r.label == "Overall Discount"
 
-		// Keep gross total label bold; other labels stay regular.
-		if isGrossTotal {
+		if isBold {
 			pdf.SetFont("Arial", "B", 9)
 		} else {
 			pdf.SetFont("Arial", "", 9)
 		}
 
-		pdf.SetX(105)
+		pdf.SetX(gstX)
 		pdf.CellFormat(labelW, 7, r.label, "1", 0, "", false, 0, "")
 
-		// Make Total Tax value bold as requested; keep Gross Total bold too.
-		if isGrossTotal || isTotalTax {
+		if isBold {
 			pdf.SetFont("Arial", "B", 9)
 		} else {
 			pdf.SetFont("Arial", "", 9)
@@ -606,44 +806,48 @@ if pdf.GetY()+footerHeight > pageHeight-bottomMargin {
 	pdf.SetY(y + boxHeight)
 
 	// ================= AMOUNT WORDS =================
-
-	amountWordsText := "Amount in Words: " + invoice.TotalInWords
-	amountWordsLines := pdf.SplitLines([]byte(amountWordsText), contentWidth-2)
+	if pdf.GetY()+amountWordsHeight > pageHeight-bottomMargin {
+		pdf.AddPage()
+	}
 
 	if len(amountWordsLines) <= 1 {
-		pdf.CellFormat(contentWidth, 7, amountWordsText, "1", 1, "", false, 0, "")
+		pdf.SetFont("Arial", "B", 9)
+		labelWidth := pdf.GetStringWidth(amountWordsLabel) + 2
+		if labelWidth > contentWidth-20 {
+			labelWidth = contentWidth * 0.35
+		}
+		wordsY := pdf.GetY()
+		pdf.Rect(8, wordsY, contentWidth, 7, "D")
+		pdf.CellFormat(labelWidth, 7, amountWordsLabel, "", 0, "L", false, 0, "")
+
+		pdf.SetFont("Arial", "", 9)
+		pdf.CellFormat(contentWidth-labelWidth, 7, amountWordsValue, "", 1, "L", false, 0, "")
 	} else {
+		pdf.SetFont("Arial", "", 9)
 		pdf.MultiCell(contentWidth, 5.5, amountWordsText, "1", "L", false)
 	}
 
 	// ================= BANK =================
+	if pdf.GetY()+bankHeight > pageHeight-bottomMargin {
+		pdf.AddPage()
+	}
 
 	y = pdf.GetY()
 
-	bankRows := []struct {
-		label string
-		value string
-	}{
-		{"Account Name", bankField(data.Bank, func(bank *models.Banks) string { return bank.AccountName })},
-		{"Account Number", bankField(data.Bank, func(bank *models.Banks) string { return bank.AccountNumber })},
-		{"Bank Name", bankField(data.Bank, func(bank *models.Banks) string { return bank.BankName })},
-		{"Branch", bankField(data.Bank, func(bank *models.Banks) string { return bank.BranchName })},
-		{"IFSC", bankField(data.Bank, func(bank *models.Banks) string { return bank.IFSC })},
-		{"UPI", bankField(data.Bank, func(bank *models.Banks) string { return bank.UPI })},
-	}
+	pdf.Rect(termsX, y, termsW, bankHeight, "D")
 
-	bankHeight := float64(len(bankRows)+1)*5.5 + 7
-
-	pdf.Rect(8, y, 97, bankHeight, "D")
-
-	pdf.SetXY(10, y+2)
+	pdf.SetXY(termsX+2, y+2)
 
 	pdf.SetFont("Arial", "B", 10)
-	pdf.Cell(92, 6, "Bank Details:")
+	pdf.Cell(termsTextWidth, 6, "Bank Details:")
 	pdf.Ln(6)
 
 	bankLabelW := 28.0
 	bankValueW := 64.0
+	if isLandscape {
+		bankLabelW = termsTextWidth * 0.3043
+		bankValueW = termsTextWidth - bankLabelW
+	}
 	for _, row := range bankRows {
 		pdf.SetFont("Arial", "", 10)
 		pdf.CellFormat(bankLabelW, 5.5, row.label+":", "", 0, "", false, 0, "")
@@ -652,9 +856,9 @@ if pdf.GetY()+footerHeight > pageHeight-bottomMargin {
 		pdf.Ln(5.5)
 	}
 
-	pdf.Rect(105, y, 97, bankHeight, "D")
+	pdf.Rect(gstX, y, gstW, bankHeight, "D")
 
-	pdf.SetXY(105, y+10)
+	pdf.SetXY(gstX, y+10)
 	prefix := "For "
 	companyName := companyField(data.Company, func(company *models.Companies) string { return company.CompanyName })
 	rightBlockPadding := 8.0
@@ -662,7 +866,7 @@ if pdf.GetY()+footerHeight > pageHeight-bottomMargin {
 	prefixWidth := pdf.GetStringWidth(prefix)
 	pdf.SetFont("Arial", "B", 9)
 	companyNameWidth := pdf.GetStringWidth(companyName)
-	lineStartX := 105 + 97 - rightBlockPadding - (prefixWidth + companyNameWidth)
+	lineStartX := gstX + gstW - rightBlockPadding - (prefixWidth + companyNameWidth)
 
 	pdf.SetXY(lineStartX, y+10)
 	pdf.SetFont("Arial", "", 9)
@@ -670,9 +874,9 @@ if pdf.GetY()+footerHeight > pageHeight-bottomMargin {
 	pdf.SetFont("Arial", "B", 9)
 	pdf.CellFormat(companyNameWidth, 5, companyName, "", 0, "", false, 0, "")
 
-	pdf.SetXY(105, y+bankHeight-8)
+	pdf.SetXY(gstX, y+bankHeight-8)
 	pdf.SetFont("Arial", "", 9)
-	pdf.CellFormat(97-rightBlockPadding, 5, "Authorised Signatory", "", 0, "R", false, 0, "")
+	pdf.CellFormat(gstW-rightBlockPadding, 5, "Authorised Signatory", "", 0, "R", false, 0, "")
 
 	pdf.SetY(y + bankHeight)
 

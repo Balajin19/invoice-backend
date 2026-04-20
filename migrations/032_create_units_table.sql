@@ -1,5 +1,3 @@
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-
 CREATE TABLE IF NOT EXISTS units (
     unit_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     unit_name VARCHAR(100) NOT NULL UNIQUE,

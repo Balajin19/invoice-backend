@@ -35,13 +35,18 @@ func GetCustomerByID(c *gin.Context) {
 }
 
 func CreateCustomer(c *gin.Context) {
+	email, ok := userEmail(c)
+	if !ok {
+		return
+	}
+
 	var customer models.Customer
 	if err := c.ShouldBindJSON(&customer); err != nil {
 		logOperationError("create customer bind payload", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	created, err := repository.CreateCustomer(customer)
+	created, err := repository.CreateCustomer(customer, email)
 	if err != nil {
 		if errors.Is(err, repository.ErrDuplicateCustomer) {
 			logOperationError("create customer duplicate customerName="+customer.CustomerName, err)
@@ -57,6 +62,11 @@ func CreateCustomer(c *gin.Context) {
 }
 
 func UpdateCustomer(c *gin.Context) {
+	email, ok := userEmail(c)
+	if !ok {
+		return
+	}
+
 	customerId := c.Param("id")
 	var customer models.Customer
 	if err := c.ShouldBindJSON(&customer); err != nil {
@@ -64,7 +74,7 @@ func UpdateCustomer(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	updated, err := repository.UpdateCustomer(customerId, customer)
+	updated, err := repository.UpdateCustomer(customerId, customer, email)
 	if err != nil {
 		if errors.Is(err, repository.ErrDuplicateCustomer) {
 			logOperationError("update customer duplicate id="+customerId, err)

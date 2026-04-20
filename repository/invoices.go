@@ -112,7 +112,7 @@ func syncInvoiceSettingsCurrentNumber(tx *sql.Tx, userEmail, companyID, invoiceN
 	return nil
 }
 
-func replaceInvoiceProducts(tx *sql.Tx, invoiceID string, products []models.InvoiceProduct) ([]models.InvoiceProduct, error) {
+func replaceInvoiceProducts(tx *sql.Tx, invoiceID string, products []models.InvoiceProduct, userEmail string) ([]models.InvoiceProduct, error) {
 	if _, err := tx.Exec(`DELETE FROM invoice_products WHERE invoice_id = $1`, invoiceID); err != nil {
 		return nil, err
 	}
@@ -126,8 +126,8 @@ func replaceInvoiceProducts(tx *sql.Tx, invoiceID string, products []models.Invo
 			return nil, err
 		}
 		err = tx.QueryRow(`
-			INSERT INTO invoice_products (invoice_id, product_id, product_name, unit, qty, price, discount, total)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			INSERT INTO invoice_products (invoice_id, product_id, product_name, unit, qty, price, discount, total, cgst_rate, sgst_rate, igst_rate, created_by, updated_by)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
 			RETURNING id
 		`,
 			invoiceID,
@@ -138,6 +138,10 @@ func replaceInvoiceProducts(tx *sql.Tx, invoiceID string, products []models.Invo
 			product.Price,
 			product.Discount,
 			product.Total,
+			product.CGSTRate,
+			product.SGSTRate,
+			product.IGSTRate,
+			userEmail,
 		).Scan(&updatedProducts[i].ID)
 		if err != nil {
 			return nil, err
@@ -166,6 +170,7 @@ func GetAllInvoices(companyID string) ([]models.Invoice, error) {
 		i.gstin,
 		COALESCE(i.payment_terms, ''),
 		i.sub_total,
+		COALESCE(i.overall_discount, 0),
 		i.cgst,
 		i.sgst,
 		COALESCE(i.igst, 0),
@@ -188,6 +193,7 @@ func GetAllInvoices(companyID string) ([]models.Invoice, error) {
 						'discount', COALESCE(ip.discount, 0),
 						'total', ip.total
 					)
+					ORDER BY lower(COALESCE(ip.product_name, '')) ASC
 				)
 				FROM invoice_products ip
 				LEFT JOIN products p ON p.product_id = ip.product_id
@@ -228,6 +234,7 @@ func GetAllInvoices(companyID string) ([]models.Invoice, error) {
 			&invoice.GSTIN,
 			&invoice.PaymentTerms,
 			&invoice.Amount,
+			&invoice.OverallDiscount,
 			&invoice.CGST,
 			&invoice.SGST,
 			&invoice.IGST,
@@ -275,6 +282,7 @@ func GetInvoiceByID(invoiceID string) (*models.Invoice, error) {
 		i.gstin,
 		COALESCE(i.payment_terms, ''),
 		i.sub_total,
+		COALESCE(i.overall_discount, 0),
 		i.cgst,
 		i.sgst,
 		COALESCE(i.igst, 0),
@@ -295,8 +303,12 @@ func GetInvoiceByID(invoiceID string) (*models.Invoice, error) {
 						'qty', ip.qty,
 						'price', ip.price,
 						'discount', COALESCE(ip.discount, 0),
-						'total', ip.total
+						'total', ip.total,
+						'cgstRate', COALESCE(ip.cgst_rate, 0),
+						'sgstRate', COALESCE(ip.sgst_rate, 0),
+						'igstRate', COALESCE(ip.igst_rate, 0)
 					)
+					ORDER BY lower(COALESCE(ip.product_name, '')) ASC
 				)
 				FROM invoice_products ip
 				LEFT JOIN products p ON p.product_id = ip.product_id
@@ -327,6 +339,7 @@ func GetInvoiceByID(invoiceID string) (*models.Invoice, error) {
 		&invoice.GSTIN,
 		&invoice.PaymentTerms,
 		&invoice.Amount,
+		&invoice.OverallDiscount,
 		&invoice.CGST,
 		&invoice.SGST,
 		&invoice.IGST,
@@ -363,9 +376,9 @@ func CreateInvoice(userEmail string, invoice models.Invoice) (*models.Invoice, e
 	INSERT INTO invoices (
 		invoice_id, invoice_number, invoice_date, company_id, customer_id, customer_name,
 		customer_address, gstin, payment_terms, po_number, po_date, sub_total, cgst, sgst, igst,
-		rounded_off, total_tax, total_amount, amount_in_words, created_by, updated_by
+		overall_discount, rounded_off, total_tax, total_amount, amount_in_words, created_by, updated_by
 	)
-	VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $19)
+	VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $20)
 	RETURNING invoice_id
 	`
 	err = tx.QueryRow(query,
@@ -380,6 +393,7 @@ func CreateInvoice(userEmail string, invoice models.Invoice) (*models.Invoice, e
 		invoice.PONumber,
 		invoice.PODate,
 		invoice.Amount,
+		invoice.OverallDiscount,
 		invoice.CGST,
 		invoice.SGST,
 		invoice.IGST,
@@ -399,8 +413,8 @@ func CreateInvoice(userEmail string, invoice models.Invoice) (*models.Invoice, e
 			return nil, err
 		}
 		productQuery := `
-		INSERT INTO invoice_products (invoice_id, product_id, product_name, unit, qty, price, discount, total)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO invoice_products (invoice_id, product_id, product_name, unit, qty, price, discount, total, created_by, updated_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
 		RETURNING id
 		`
 		err = tx.QueryRow(productQuery,
@@ -412,6 +426,7 @@ func CreateInvoice(userEmail string, invoice models.Invoice) (*models.Invoice, e
 			product.Price,
 			product.Discount,
 			product.Total,
+			userEmail,
 		).Scan(&invoice.Products[i].ID)
 		if err != nil {
 			return nil, err
@@ -450,15 +465,16 @@ func UpdateInvoice(invoiceID string, invoice models.Invoice, userEmail string) (
 	    po_number        = $9,
 	    po_date          = $10,
 	    sub_total        = $11,
-	    cgst             = $12,
-	    sgst             = $13,
-	    igst             = $14,
-	    rounded_off      = $15,
-	    total_tax        = $16,
-	    total_amount     = $17,
-	    amount_in_words  = $18,
-	    updated_by       = $19
-	WHERE invoice_id = $20
+	    overall_discount = $12,
+	    cgst             = $13,
+	    sgst             = $14,
+	    igst             = $15,
+	    rounded_off      = $16,
+	    total_tax        = $17,
+	    total_amount     = $18,
+	    amount_in_words  = $19,
+	    updated_by       = $20
+	WHERE invoice_id = $21
 	`
 	result, err := tx.Exec(query,
 		invoice.InvoiceNumber,
@@ -472,6 +488,7 @@ func UpdateInvoice(invoiceID string, invoice models.Invoice, userEmail string) (
 		invoice.PONumber,
 		invoice.PODate,
 		invoice.Amount,
+		invoice.OverallDiscount,
 		invoice.CGST,
 		invoice.SGST,
 		invoice.IGST,
@@ -493,7 +510,7 @@ func UpdateInvoice(invoiceID string, invoice models.Invoice, userEmail string) (
 		return nil, sql.ErrNoRows
 	}
 
-	invoice.Products, err = replaceInvoiceProducts(tx, invoiceID, invoice.Products)
+	invoice.Products, err = replaceInvoiceProducts(tx, invoiceID, invoice.Products, userEmail)
 	if err != nil {
 		return nil, err
 	}

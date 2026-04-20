@@ -13,7 +13,7 @@ const companySelect = `
 		company_id, company_name, COALESCE(owner_name, ''),
 		COALESCE(building_number, ''), COALESCE(street, ''), COALESCE(city, ''),
 		COALESCE(district, ''), COALESCE(state, ''), COALESCE(pincode, ''),
-		COALESCE(gstin, ''), COALESCE(cgst_rate, 0), COALESCE(sgst_rate, 0), COALESCE(igst_rate, 0), COALESCE(email, ''), COALESCE(mobile_number, ''),
+		COALESCE(gstin, ''), COALESCE(cgst_rate, 0), COALESCE(sgst_rate, 0), COALESCE(igst_rate, 0), COALESCE(email, ''), COALESCE(website, ''), COALESCE(mobile_number, ''),
 		COALESCE(is_primary, false),
 		created_at::text, updated_at::text,
 		COALESCE(created_at_epoch, 0), COALESCE(updated_at_epoch, 0),
@@ -27,7 +27,7 @@ func scanCompany(row interface{ Scan(...any) error }) (models.Companies, error) 
 		&company.CompanyID, &company.CompanyName, &company.OwnerName,
 		&company.BuildingNumber, &company.Street, &company.City,
 		&company.District, &company.State, &company.Pincode,
-		&company.GSTIN, &company.CGSTRate, &company.SGSTRate, &company.IGSTRate, &company.Email, &company.MobileNumber,
+		&company.GSTIN, &company.CGSTRate, &company.SGSTRate, &company.IGSTRate, &company.Email, &company.Website, &company.MobileNumber,
 		&company.IsPrimary,
 		&company.CreatedAt, &company.UpdatedAt,
 		&company.CreatedAtEpoch, &company.UpdatedAtEpoch,
@@ -88,13 +88,13 @@ func CreateCompanySettings(userEmail string, payload models.Companies) (*models.
 	err = tx.QueryRow(`
 		INSERT INTO companies (
 			company_name, owner_name, building_number, street, city, district,
-			state, pincode, gstin, cgst_rate, sgst_rate, igst_rate, email, mobile_number, is_primary,
+			state, pincode, gstin, cgst_rate, sgst_rate, igst_rate, email, website, mobile_number, is_primary,
 			created_by, updated_by
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $16)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $17)
 		RETURNING company_id`,
 		payload.CompanyName, payload.OwnerName, payload.BuildingNumber, payload.Street,
 		payload.City, payload.District, payload.State, payload.Pincode,
-		payload.GSTIN, payload.CGSTRate, payload.SGSTRate, payload.IGSTRate, payload.Email, payload.MobileNumber, payload.IsPrimary, userEmail,
+		payload.GSTIN, payload.CGSTRate, payload.SGSTRate, payload.IGSTRate, payload.Email, payload.Website, payload.MobileNumber, payload.IsPrimary, userEmail,
 	).Scan(&id)
 	if err != nil {
 		return nil, err
@@ -130,12 +130,12 @@ func UpdateCompanySettingsByID(id, userEmail string, payload models.Companies) (
 		SET
 			company_name = $1, owner_name = $2, building_number = $3, street = $4,
 			city = $5, district = $6, state = $7, pincode = $8,
-			gstin = $9, cgst_rate = $10, sgst_rate = $11, igst_rate = $12, email = $13, mobile_number = $14, is_primary = $15,
-			updated_by = $16
-		WHERE company_id = $17`,
+			gstin = $9, cgst_rate = $10, sgst_rate = $11, igst_rate = $12, email = $13, website = $14, mobile_number = $15, is_primary = $16,
+			updated_by = $17
+		WHERE company_id = $18`,
 		payload.CompanyName, payload.OwnerName, payload.BuildingNumber, payload.Street,
 		payload.City, payload.District, payload.State, payload.Pincode,
-		payload.GSTIN, payload.CGSTRate, payload.SGSTRate, payload.IGSTRate, payload.Email, payload.MobileNumber, payload.IsPrimary, userEmail, id,
+		payload.GSTIN, payload.CGSTRate, payload.SGSTRate, payload.IGSTRate, payload.Email, payload.Website, payload.MobileNumber, payload.IsPrimary, userEmail, id,
 	)
 	if err != nil {
 		return nil, err

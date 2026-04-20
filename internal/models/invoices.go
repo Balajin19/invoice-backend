@@ -14,6 +14,9 @@ type InvoiceProduct struct {
 	Price       float64 `json:"price" db:"price"`
 	Discount    float64 `json:"discount" db:"discount"`
 	Total       float64 `json:"total" db:"total"`
+	CGSTRate    float64 `json:"cgstRate" db:"cgst_rate"`
+	SGSTRate    float64 `json:"sgstRate" db:"sgst_rate"`
+	IGSTRate    float64 `json:"igstRate" db:"igst_rate"`
 }
 
 // Invoice represents an invoice in the system
@@ -30,6 +33,7 @@ type Invoice struct {
 	GSTIN         string    `json:"gstIn" db:"gstin"`
 	PaymentTerms  string    `json:"paymentTerms" db:"payment_terms"`
 	Amount        float64   `json:"subTotal" db:"sub_total"`
+	OverallDiscount float64 `json:"overallDiscount" db:"overall_discount"`
 	CGST          float64   `json:"cgst" db:"cgst"`
 	SGST          float64   `json:"sgst" db:"sgst"`
 	IGST          float64   `json:"igst" db:"igst"`

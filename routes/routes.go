@@ -40,6 +40,9 @@ func isAllowedOrigin(origin string) bool {
 
 func SetupRoutes() *gin.Engine {
 	r := gin.Default()
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{"status": "ok"})
+	})
 
 	r.Use(cors.New(cors.Config{
 		AllowOriginFunc:  isAllowedOrigin,

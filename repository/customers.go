@@ -20,18 +20,22 @@ func joinCustomerAddress(parts ...string) string {
 	return strings.Join(filtered, ", ")
 }
 
-func replaceCustomerProducts(tx *sql.Tx, customerID string, products []models.CustomerProduct) error {
+func replaceCustomerProducts(tx *sql.Tx, customerID string, products []models.CustomerProduct, userEmail string) error {
 	if _, err := tx.Exec(`DELETE FROM customer_products WHERE customer_id = $1`, customerID); err != nil {
 		return err
 	}
 
 	for _, p := range products {
 		if _, err := tx.Exec(
-			`INSERT INTO customer_products (customer_id, product_id, unit_id, price) VALUES ($1, $2, $3, $4)`,
+			`INSERT INTO customer_products (customer_id, product_id, unit_id, price, cgst_rate, sgst_rate, igst_rate, created_by, updated_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)`,
 			customerID,
 			p.ProductId,
 			p.UnitID,
 			p.Price,
+			p.CGSTRate,
+			p.SGSTRate,
+			p.IGSTRate,
+			userEmail,
 		); err != nil {
 			return err
 		}
@@ -59,9 +63,14 @@ func GetAllCustomers() ([]models.Customer, error) {
 						'productId', cp.product_id,
 						'unitId', cp.unit_id,
 						'productName', p.product_name,
+						'hsnSac', p.hsn_sac,
 						'unit', COALESCE(u.unit_name, ''),
-						'price', cp.price
+						'price', cp.price,
+						'cgstRate', cp.cgst_rate,
+						'sgstRate', cp.sgst_rate,
+						'igstRate', cp.igst_rate
 					)
+					ORDER BY lower(COALESCE(p.product_name, '')) ASC
 				)
 				FROM customer_products cp
 				LEFT JOIN products p ON p.product_id = cp.product_id
@@ -138,9 +147,14 @@ func GetCustomerByID(customerId string) (*models.Customer, error) {
 						'productId', cp.product_id,
 						'unitId', cp.unit_id,
 						'productName', p.product_name,
+						'hsnSac', p.hsn_sac,
 						'unit', COALESCE(u.unit_name, ''),
-						'price', cp.price
+						'price', cp.price,
+						'cgstRate', cp.cgst_rate,
+						'sgstRate', cp.sgst_rate,
+						'igstRate', cp.igst_rate
 					)
+					ORDER BY lower(COALESCE(p.product_name, '')) ASC
 				)
 				FROM customer_products cp
 				LEFT JOIN products p ON p.product_id = cp.product_id
@@ -186,7 +200,7 @@ func GetCustomerByID(customerId string) (*models.Customer, error) {
 	return &customer, nil
 }
 
-func CreateCustomer(customer models.Customer) (*models.Customer, error) {
+func CreateCustomer(customer models.Customer, userEmail string) (*models.Customer, error) {
 	var exists bool
 	err := config.DB.QueryRow(
 		`SELECT EXISTS (
@@ -222,8 +236,8 @@ func CreateCustomer(customer models.Customer) (*models.Customer, error) {
 	defer tx.Rollback()
 
 	query := `
-	INSERT INTO customers (customer_id, customer_name, building_number, street, city, district, state, pincode, gstin)
-	VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8)
+	INSERT INTO customers (customer_id, customer_name, building_number, street, city, district, state, pincode, gstin, created_by, updated_by)
+	VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
 	RETURNING customer_id
 	`
 	err = tx.QueryRow(query,
@@ -235,12 +249,13 @@ func CreateCustomer(customer models.Customer) (*models.Customer, error) {
 		customer.Address.State,
 		customer.Address.Pincode,
 		customer.GSTIN,
+		userEmail,
 	).Scan(&customer.CustomerId)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := replaceCustomerProducts(tx, customer.CustomerId, customer.Products); err != nil {
+	if err := replaceCustomerProducts(tx, customer.CustomerId, customer.Products, userEmail); err != nil {
 		return nil, err
 	}
 
@@ -251,7 +266,7 @@ func CreateCustomer(customer models.Customer) (*models.Customer, error) {
 	return GetCustomerByID(customer.CustomerId)
 }
 
-func UpdateCustomer(customerId string, customer models.Customer) (*models.Customer, error) {
+func UpdateCustomer(customerId string, customer models.Customer, userEmail string) (*models.Customer, error) {
 	var exists bool
 	err := config.DB.QueryRow(
 		`SELECT EXISTS (
@@ -291,8 +306,9 @@ func UpdateCustomer(customerId string, customer models.Customer) (*models.Custom
 	    district        = $5,
 	    state           = $6,
 	    pincode         = $7,
-	    gstin           = $8
-	WHERE customer_id = $9
+	    gstin           = $8,
+	    updated_by      = $9
+	WHERE customer_id = $10
 	`
 	tx, err := config.DB.Begin()
 	if err != nil {
@@ -309,6 +325,7 @@ func UpdateCustomer(customerId string, customer models.Customer) (*models.Custom
 		customer.Address.State,
 		customer.Address.Pincode,
 		customer.GSTIN,
+		userEmail,
 		customerId,
 	)
 	if err != nil {
@@ -322,7 +339,7 @@ func UpdateCustomer(customerId string, customer models.Customer) (*models.Custom
 		return nil, sql.ErrNoRows
 	}
 
-	if err := replaceCustomerProducts(tx, customerId, customer.Products); err != nil {
+	if err := replaceCustomerProducts(tx, customerId, customer.Products, userEmail); err != nil {
 		return nil, err
 	}
 

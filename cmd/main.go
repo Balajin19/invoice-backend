@@ -3,6 +3,7 @@ package main
 import (
 	"invoice-generator-backend/config"
 	"invoice-generator-backend/routes"
+	"os"
 
 	"github.com/joho/godotenv"
 )
@@ -15,5 +16,9 @@ func main() {
 	config.ConnectDB()
 
 	r := routes.SetupRoutes()
-	r.Run(":8080")
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	r.Run(":" + port)
 }

@@ -1,5 +1,3 @@
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-
 -- Ensure dependency table exists for safe FK creation in fresh environments.
 CREATE TABLE IF NOT EXISTS units (
     unit_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
