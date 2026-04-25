@@ -69,54 +69,38 @@ func resolveInvoiceProductUnit(tx *sql.Tx, product models.InvoiceProduct) (strin
 	return resolvedUnit, nil
 }
 
-func syncInvoiceSettingsCurrentNumber(tx *sql.Tx, userEmail, companyID, invoiceNumber string, invoiceDate time.Time) error {
+
+func syncInvoiceSettingsCurrentNumber(tx *sql.Tx, userEmail, companyID, invoiceNumber string) error {
 	prefix, sequence, err := parseInvoiceNumber(invoiceNumber)
 	if err != nil {
 		return err
 	}
-	financialYear := normalizeFinancialYear("", invoiceDate)
-
 	nullCompanyID := nullableUUID(companyID)
-	result, err := tx.Exec(`
-		WITH target AS (
-			SELECT id
-			FROM invoice_settings
-			WHERE TRIM(LOWER(invoice_prefix)) = TRIM(LOWER($1))
-			  AND (
-				($2::uuid IS NOT NULL AND company_id = $2::uuid)
-				OR
-				($2::uuid IS NULL)
-			  )
-			ORDER BY created_at DESC
-			LIMIT 1
-		)
-		UPDATE invoice_settings AS invoice_setting
-		SET
-			current_number = CASE
-				WHEN TRIM(COALESCE(invoice_setting.financial_year, '')) <> ''
-				     AND TRIM(invoice_setting.financial_year) <> TRIM($3)
-				THEN GREATEST(COALESCE(invoice_setting.start_number, 1) - 1, $4)
-				ELSE GREATEST(COALESCE(invoice_setting.current_number, 0), $4)
-			END,
-			financial_year = $3,
-			updated_by = $5
-		FROM target
-		WHERE invoice_setting.id = target.id`,
-		prefix, nullCompanyID, financialYear, sequence, userEmail,
-	)
+
+	var settingID string
+	var currentNumber int
+	err = tx.QueryRow(`
+		SELECT id, COALESCE(current_number, 0)
+		FROM invoice_settings
+		WHERE TRIM(LOWER(invoice_prefix)) = TRIM(LOWER($1))
+		  AND (($2::uuid IS NOT NULL AND company_id = $2::uuid) OR ($2::uuid IS NULL))
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, prefix, nullCompanyID).Scan(&settingID, &currentNumber)
 	if err != nil {
 		return err
 	}
 
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rowsAffected == 0 {
-		return sql.ErrNoRows
+	if sequence <= currentNumber {
+		return nil
 	}
 
-	return nil
+	_, err = tx.Exec(`
+		UPDATE invoice_settings
+		SET current_number = $1, updated_by = $2
+		WHERE id = $3
+	`, sequence, userEmail, settingID)
+	return err
 }
 
 func replaceInvoiceProducts(tx *sql.Tx, invoiceID string, products []models.InvoiceProduct, userEmail string) ([]models.InvoiceProduct, error) {
@@ -446,7 +430,7 @@ func CreateInvoice(userEmail string, invoice models.Invoice) (*models.Invoice, e
 		invoice.Products[i].Unit = unitValue
 	}
 
-	if err = syncInvoiceSettingsCurrentNumber(tx, userEmail, invoice.CompanyId, invoice.InvoiceNumber, invoice.InvoiceDate); err != nil {
+	if err = syncInvoiceSettingsCurrentNumber(tx, userEmail, invoice.CompanyId, invoice.InvoiceNumber); err != nil {
 		return nil, err
 	}
 
@@ -526,7 +510,7 @@ func UpdateInvoice(invoiceID string, invoice models.Invoice, userEmail string) (
 		return nil, err
 	}
 
-	if err = syncInvoiceSettingsCurrentNumber(tx, userEmail, invoice.CompanyId, invoice.InvoiceNumber, invoice.InvoiceDate); err != nil {
+	if err = syncInvoiceSettingsCurrentNumber(tx, userEmail, invoice.CompanyId, invoice.InvoiceNumber); err != nil {
 		return nil, err
 	}
 

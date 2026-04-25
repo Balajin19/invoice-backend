@@ -3,6 +3,7 @@ package routes
 import (
 	handler "invoice-generator-backend/internal/handlers"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -40,6 +41,16 @@ func isAllowedOrigin(origin string) bool {
 
 func SetupRoutes() *gin.Engine {
 	r := gin.Default()
+	trustedProxies := strings.TrimSpace(os.Getenv("TRUSTED_PROXIES"))
+	if trustedProxies == "" {
+		_ = r.SetTrustedProxies(nil)
+	} else {
+		parts := strings.Split(trustedProxies, ",")
+		for i := range parts {
+			parts[i] = strings.TrimSpace(parts[i])
+		}
+		_ = r.SetTrustedProxies(parts)
+	}
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
 	})

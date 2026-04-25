@@ -8,7 +8,19 @@ import (
 
 	"invoice-generator-backend/config"
 	"invoice-generator-backend/internal/models"
+
+	"github.com/lib/pq"
 )
+
+// currentFinancialYear returns the YY-YY string for today using Apr-Mar boundaries.
+func currentFinancialYear() string {
+	now := time.Now()
+	start := now.Year()
+	if now.Month() < time.April {
+		start--
+	}
+	return fmt.Sprintf("%02d-%02d", start%100, (start+1)%100)
+}
 
 const invoiceSettingsSelect = `
 	SELECT
@@ -19,20 +31,6 @@ const invoiceSettingsSelect = `
 		COALESCE(created_by, ''), COALESCE(updated_by, '')
 	FROM invoice_settings
 `
-
-func normalizeFinancialYear(value string, date time.Time) string {
-	trimmed := strings.TrimSpace(value)
-	if trimmed != "" {
-		return trimmed
-	}
-
-	startYear := date.Year()
-	if date.Month() < time.April {
-		startYear--
-	}
-
-	return fmt.Sprintf("%02d-%02d", startYear%100, (startYear+1)%100)
-}
 
 func scanInvoiceSettings(row interface{ Scan(...any) error }) (models.InvoiceSettings, error) {
 	var s models.InvoiceSettings
@@ -100,7 +98,7 @@ func GetInvoiceSettingsByCompanyIDSingle(companyID string) (*models.InvoiceSetti
 
 func CreateInvoiceSettings(userEmail string, payload models.InvoiceSettings) (*models.InvoiceSettings, error) {
 	var id string
-	financialYear := normalizeFinancialYear(payload.FinancialYear, time.Now())
+	financialYear := strings.TrimSpace(payload.FinancialYear)
 	err := config.DB.QueryRow(`
 		INSERT INTO invoice_settings (
 			company_id, invoice_prefix, financial_year, start_number, current_number, pad_length, terms_conditions,
@@ -111,23 +109,28 @@ func CreateInvoiceSettings(userEmail string, payload models.InvoiceSettings) (*m
 		payload.PadLength, payload.TermsConditions, userEmail,
 	).Scan(&id)
 	if err != nil {
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+			return nil, ErrDuplicateInvoiceSettingsFY
+		}
 		return nil, err
 	}
 	return GetInvoiceSettingsByID(id)
 }
 
 func UpdateInvoiceSettings(id, userEmail string, payload models.InvoiceSettings) (*models.InvoiceSettings, error) {
-	financialYear := normalizeFinancialYear(payload.FinancialYear, time.Now())
 	result, err := config.DB.Exec(`
 		UPDATE invoice_settings
 		SET
 			company_id = $1, invoice_prefix = $2, financial_year = $3, start_number = $4, current_number = $5, pad_length = $6,
 			terms_conditions = $7, updated_by = $8
 		WHERE id = $9`,
-		payload.CompanyID, payload.InvoicePrefix, financialYear, payload.StartNumber, payload.CurrentNumber, payload.PadLength,
+		payload.CompanyID, payload.InvoicePrefix, strings.TrimSpace(payload.FinancialYear), payload.StartNumber, payload.CurrentNumber, payload.PadLength,
 		payload.TermsConditions, userEmail, id,
 	)
 	if err != nil {
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+			return nil, ErrDuplicateInvoiceSettingsFY
+		}
 		return nil, err
 	}
 	n, _ := result.RowsAffected()

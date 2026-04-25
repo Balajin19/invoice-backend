@@ -25,8 +25,26 @@ CREATE TABLE IF NOT EXISTS products (
     updated_by TEXT
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_products_name_unit_category_unique
-    ON products (LOWER(TRIM(product_name)), LOWER(TRIM(unit)), category_id);
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM (
+            SELECT LOWER(TRIM(product_name)) AS product_name_key,
+                   LOWER(TRIM(unit)) AS unit_key,
+                   category_id,
+                   COUNT(*) AS cnt
+            FROM products
+            GROUP BY LOWER(TRIM(product_name)), LOWER(TRIM(unit)), category_id
+            HAVING COUNT(*) > 1
+        ) duplicates
+    ) THEN
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_products_name_unit_category_unique
+            ON products (LOWER(TRIM(product_name)), LOWER(TRIM(unit)), category_id);
+    ELSE
+        RAISE NOTICE 'Skipping idx_products_name_unit_category_unique creation because duplicate product records exist';
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS customers (
     customer_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -46,16 +64,38 @@ CREATE TABLE IF NOT EXISTS customers (
     updated_by TEXT
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_identity_unique
-    ON customers (
-        LOWER(TRIM(customer_name)),
-        LOWER(TRIM(building_number)),
-        LOWER(TRIM(COALESCE(street, ''))),
-        LOWER(TRIM(city)),
-        LOWER(TRIM(district)),
-        LOWER(TRIM(state)),
-        LOWER(TRIM(pincode))
-    );
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM (
+            SELECT LOWER(TRIM(customer_name)) AS customer_name_key,
+                   LOWER(TRIM(building_number)) AS building_number_key,
+                   LOWER(TRIM(COALESCE(street, ''))) AS street_key,
+                   LOWER(TRIM(city)) AS city_key,
+                   LOWER(TRIM(district)) AS district_key,
+                   LOWER(TRIM(state)) AS state_key,
+                   LOWER(TRIM(pincode)) AS pincode_key,
+                   COUNT(*) AS cnt
+            FROM customers
+            GROUP BY LOWER(TRIM(customer_name)), LOWER(TRIM(building_number)), LOWER(TRIM(COALESCE(street, ''))), LOWER(TRIM(city)), LOWER(TRIM(district)), LOWER(TRIM(state)), LOWER(TRIM(pincode))
+            HAVING COUNT(*) > 1
+        ) duplicates
+    ) THEN
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_identity_unique
+            ON customers (
+                LOWER(TRIM(customer_name)),
+                LOWER(TRIM(building_number)),
+                LOWER(TRIM(COALESCE(street, ''))),
+                LOWER(TRIM(city)),
+                LOWER(TRIM(district)),
+                LOWER(TRIM(state)),
+                LOWER(TRIM(pincode))
+            );
+    ELSE
+        RAISE NOTICE 'Skipping idx_customers_identity_unique creation because duplicate customer records exist';
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS customer_products (
     id BIGSERIAL PRIMARY KEY,

@@ -11,4 +11,5 @@ var (
 	ErrDuplicateCustomer = errors.New("customer already exists")
 	ErrDuplicateEmail    = errors.New("email already exists")
 	ErrSettingsAlreadyExists = errors.New("settings already exist")
+	ErrDuplicateInvoiceSettingsFY = errors.New("invoice settings already exist for this financial year")
 )

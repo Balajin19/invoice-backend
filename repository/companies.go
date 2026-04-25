@@ -3,7 +3,6 @@ package repository
 import (
 	"database/sql"
 	"strings"
-	"time"
 
 	"invoice-generator-backend/config"
 	"invoice-generator-backend/internal/models"
@@ -111,7 +110,7 @@ func CreateCompanySettings(userEmail string, payload models.Companies) (*models.
 		)`,
 		id,
 		defaultInvoicePrefix(payload.CompanyName),
-		normalizeFinancialYear("", time.Now()),
+		currentFinancialYear(),
 		"1. Dispute if any shall be subject to Chennai Jurisdiction\n2. Goods once sold will not be taken back\n3. Payment Terms : {{payment_terms}}",
 		userEmail,
 	)

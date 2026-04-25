@@ -38,5 +38,23 @@ CREATE INDEX IF NOT EXISTS idx_products_unit_id ON products(unit_id);
 
 DROP INDEX IF EXISTS idx_products_name_unit_category_unique;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_products_name_unit_category_unique
-    ON products (LOWER(TRIM(product_name)), unit_id, category_id);
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM (
+            SELECT LOWER(TRIM(product_name)) AS product_name_key,
+                   unit_id,
+                   category_id,
+                   COUNT(*) AS cnt
+            FROM products
+            GROUP BY LOWER(TRIM(product_name)), unit_id, category_id
+            HAVING COUNT(*) > 1
+        ) duplicates
+    ) THEN
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_products_name_unit_category_unique
+            ON products (LOWER(TRIM(product_name)), unit_id, category_id);
+    ELSE
+        RAISE NOTICE 'Skipping idx_products_name_unit_category_unique creation because duplicate product records exist after unit mapping';
+    END IF;
+END $$;

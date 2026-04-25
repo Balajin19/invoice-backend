@@ -65,6 +65,11 @@ func CreateInvoiceSettings(c *gin.Context) {
 	}
 	s, err := repository.CreateInvoiceSettings(email, payload)
 	if err != nil {
+		if errors.Is(err, repository.ErrDuplicateInvoiceSettingsFY) {
+			logOperationError("create invoice settings duplicate FY email="+email, err)
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
 		logOperationError("create invoice settings email="+email, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
