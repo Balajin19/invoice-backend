@@ -178,6 +178,7 @@ func GetAllInvoices(companyID string) ([]models.Invoice, error) {
 		COALESCE(i.total_tax, 0),
 		i.total_amount,
 		i.amount_in_words,
+		COALESCE(i.is_active, TRUE),
 		COALESCE(
 			(
 				SELECT json_agg(
@@ -242,6 +243,7 @@ func GetAllInvoices(companyID string) ([]models.Invoice, error) {
 			&invoice.TotalTax,
 			&invoice.Total,
 			&invoice.TotalInWords,
+			&invoice.IsActive,
 			&productsJSON,
 		)
 		if err != nil {
@@ -290,6 +292,7 @@ func GetInvoiceByID(invoiceID string) (*models.Invoice, error) {
 		COALESCE(i.total_tax, 0),
 		i.total_amount,
 		i.amount_in_words,
+		COALESCE(i.is_active, TRUE),
 		COALESCE(
 			(
 				SELECT json_agg(
@@ -347,6 +350,7 @@ func GetInvoiceByID(invoiceID string) (*models.Invoice, error) {
 		&invoice.TotalTax,
 		&invoice.Total,
 		&invoice.TotalInWords,
+		&invoice.IsActive,
 		&productsJSON,
 	)
 	if err != nil {

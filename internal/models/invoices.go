@@ -74,6 +74,7 @@ type Invoice struct {
 	TotalTax      float64   `json:"totalTax" db:"total_tax"`
 	Total         float64   `json:"totalAmount" db:"total_amount"`
 	TotalInWords  string    `json:"amountInWords" db:"amount_in_words"`
+	IsActive      bool      `json:"isActive" db:"is_active"`
 	Products      []InvoiceProduct `json:"products"`
 }
 
