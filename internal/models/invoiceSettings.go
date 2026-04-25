@@ -4,6 +4,7 @@ type InvoiceSettings struct {
 	ID               string `json:"id" db:"id"`
 	CompanyID        string `json:"companyId" db:"company_id"`
 	InvoicePrefix    string `json:"invoicePrefix" db:"invoice_prefix"`
+	FinancialYear    string `json:"financialYear" db:"financial_year"`
 	StartNumber      int    `json:"startNumber" db:"start_number"`
 	CurrentNumber    int    `json:"currentNumber" db:"current_number"`
 	PadLength        int    `json:"padLength" db:"pad_length"`

@@ -3,6 +3,7 @@ package repository
 import (
 	"database/sql"
 	"strings"
+	"time"
 
 	"invoice-generator-backend/config"
 	"invoice-generator-backend/internal/models"
@@ -102,14 +103,15 @@ func CreateCompanySettings(userEmail string, payload models.Companies) (*models.
 
 	_, err = tx.Exec(`
 		INSERT INTO invoice_settings (
-			company_id, invoice_prefix, start_number, current_number, pad_length, terms_conditions,
+			company_id, invoice_prefix, financial_year, start_number, current_number, pad_length, terms_conditions,
 			created_by, updated_by
 		) VALUES (
-			$1, $2, 1, 0, 3, $3,
-			$4, $4
+			$1, $2, $3, 1, 0, 3, $4,
+			$5, $5
 		)`,
 		id,
 		defaultInvoicePrefix(payload.CompanyName),
+		normalizeFinancialYear("", time.Now()),
 		"1. Dispute if any shall be subject to Chennai Jurisdiction\n2. Goods once sold will not be taken back\n3. Payment Terms : {{payment_terms}}",
 		userEmail,
 	)

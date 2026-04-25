@@ -69,11 +69,12 @@ func resolveInvoiceProductUnit(tx *sql.Tx, product models.InvoiceProduct) (strin
 	return resolvedUnit, nil
 }
 
-func syncInvoiceSettingsCurrentNumber(tx *sql.Tx, userEmail, companyID, invoiceNumber string) error {
+func syncInvoiceSettingsCurrentNumber(tx *sql.Tx, userEmail, companyID, invoiceNumber string, invoiceDate time.Time) error {
 	prefix, sequence, err := parseInvoiceNumber(invoiceNumber)
 	if err != nil {
 		return err
 	}
+	financialYear := normalizeFinancialYear("", invoiceDate)
 
 	nullCompanyID := nullableUUID(companyID)
 	result, err := tx.Exec(`
@@ -91,11 +92,17 @@ func syncInvoiceSettingsCurrentNumber(tx *sql.Tx, userEmail, companyID, invoiceN
 		)
 		UPDATE invoice_settings AS invoice_setting
 		SET
-			current_number = GREATEST(COALESCE(invoice_setting.current_number, 0), $3),
-			updated_by = $4
+			current_number = CASE
+				WHEN TRIM(COALESCE(invoice_setting.financial_year, '')) <> ''
+				     AND TRIM(invoice_setting.financial_year) <> TRIM($3)
+				THEN GREATEST(COALESCE(invoice_setting.start_number, 1) - 1, $4)
+				ELSE GREATEST(COALESCE(invoice_setting.current_number, 0), $4)
+			END,
+			financial_year = $3,
+			updated_by = $5
 		FROM target
 		WHERE invoice_setting.id = target.id`,
-		prefix, nullCompanyID, sequence, userEmail,
+		prefix, nullCompanyID, financialYear, sequence, userEmail,
 	)
 	if err != nil {
 		return err
@@ -439,7 +446,7 @@ func CreateInvoice(userEmail string, invoice models.Invoice) (*models.Invoice, e
 		invoice.Products[i].Unit = unitValue
 	}
 
-	if err = syncInvoiceSettingsCurrentNumber(tx, userEmail, invoice.CompanyId, invoice.InvoiceNumber); err != nil {
+	if err = syncInvoiceSettingsCurrentNumber(tx, userEmail, invoice.CompanyId, invoice.InvoiceNumber, invoice.InvoiceDate); err != nil {
 		return nil, err
 	}
 
@@ -519,7 +526,7 @@ func UpdateInvoice(invoiceID string, invoice models.Invoice, userEmail string) (
 		return nil, err
 	}
 
-	if err = syncInvoiceSettingsCurrentNumber(tx, userEmail, invoice.CompanyId, invoice.InvoiceNumber); err != nil {
+	if err = syncInvoiceSettingsCurrentNumber(tx, userEmail, invoice.CompanyId, invoice.InvoiceNumber, invoice.InvoiceDate); err != nil {
 		return nil, err
 	}
 

@@ -2,6 +2,9 @@ package repository
 
 import (
 	"database/sql"
+	"fmt"
+	"strings"
+	"time"
 
 	"invoice-generator-backend/config"
 	"invoice-generator-backend/internal/models"
@@ -9,7 +12,7 @@ import (
 
 const invoiceSettingsSelect = `
 	SELECT
-		id, COALESCE(company_id::text, ''), invoice_prefix, start_number, COALESCE(current_number, 0), pad_length,
+		id, COALESCE(company_id::text, ''), invoice_prefix, COALESCE(financial_year, ''), start_number, COALESCE(current_number, 0), pad_length,
 		COALESCE(terms_conditions, ''),
 		created_at::text, updated_at::text,
 		COALESCE(created_at_epoch, 0), COALESCE(updated_at_epoch, 0),
@@ -17,10 +20,24 @@ const invoiceSettingsSelect = `
 	FROM invoice_settings
 `
 
+func normalizeFinancialYear(value string, date time.Time) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed != "" {
+		return trimmed
+	}
+
+	startYear := date.Year()
+	if date.Month() < time.April {
+		startYear--
+	}
+
+	return fmt.Sprintf("%02d-%02d", startYear%100, (startYear+1)%100)
+}
+
 func scanInvoiceSettings(row interface{ Scan(...any) error }) (models.InvoiceSettings, error) {
 	var s models.InvoiceSettings
 	err := row.Scan(
-		&s.ID, &s.CompanyID, &s.InvoicePrefix, &s.StartNumber, &s.CurrentNumber, &s.PadLength, &s.TermsConditions,
+		&s.ID, &s.CompanyID, &s.InvoicePrefix, &s.FinancialYear, &s.StartNumber, &s.CurrentNumber, &s.PadLength, &s.TermsConditions,
 		&s.CreatedAt, &s.UpdatedAt, &s.CreatedAtEpoch, &s.UpdatedAtEpoch,
 		&s.CreatedBy, &s.UpdatedBy,
 	)
@@ -83,13 +100,14 @@ func GetInvoiceSettingsByCompanyIDSingle(companyID string) (*models.InvoiceSetti
 
 func CreateInvoiceSettings(userEmail string, payload models.InvoiceSettings) (*models.InvoiceSettings, error) {
 	var id string
+	financialYear := normalizeFinancialYear(payload.FinancialYear, time.Now())
 	err := config.DB.QueryRow(`
 		INSERT INTO invoice_settings (
-			company_id, invoice_prefix, start_number, current_number, pad_length, terms_conditions,
+			company_id, invoice_prefix, financial_year, start_number, current_number, pad_length, terms_conditions,
 			created_by, updated_by
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
 		RETURNING id`,
-		payload.CompanyID, payload.InvoicePrefix, payload.StartNumber, payload.CurrentNumber,
+		payload.CompanyID, payload.InvoicePrefix, financialYear, payload.StartNumber, payload.CurrentNumber,
 		payload.PadLength, payload.TermsConditions, userEmail,
 	).Scan(&id)
 	if err != nil {
@@ -99,13 +117,14 @@ func CreateInvoiceSettings(userEmail string, payload models.InvoiceSettings) (*m
 }
 
 func UpdateInvoiceSettings(id, userEmail string, payload models.InvoiceSettings) (*models.InvoiceSettings, error) {
+	financialYear := normalizeFinancialYear(payload.FinancialYear, time.Now())
 	result, err := config.DB.Exec(`
 		UPDATE invoice_settings
 		SET
-			company_id = $1, invoice_prefix = $2, start_number = $3, current_number = $4, pad_length = $5,
-			terms_conditions = $6, updated_by = $7
-		WHERE id = $8`,
-		payload.CompanyID, payload.InvoicePrefix, payload.StartNumber, payload.CurrentNumber, payload.PadLength,
+			company_id = $1, invoice_prefix = $2, financial_year = $3, start_number = $4, current_number = $5, pad_length = $6,
+			terms_conditions = $7, updated_by = $8
+		WHERE id = $9`,
+		payload.CompanyID, payload.InvoicePrefix, financialYear, payload.StartNumber, payload.CurrentNumber, payload.PadLength,
 		payload.TermsConditions, userEmail, id,
 	)
 	if err != nil {
