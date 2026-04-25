@@ -80,6 +80,7 @@ func GetAllCustomers() ([]models.Customer, error) {
 			'[]'::json
 		) AS products
 	FROM customers c
+	ORDER BY lower(COALESCE(c.customer_name, '')) ASC
 	`
 
 	rows, err := config.DB.Query(query)
