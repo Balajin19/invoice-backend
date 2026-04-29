@@ -236,6 +236,7 @@ func GetAllInvoices(companyID string) ([]models.Invoice, error) {
 			&invoice.Total,
 			&invoice.TotalInWords,
 			&invoice.IsActive,
+			&invoice.IsGstBill,
 			&productsJSON,
 		)
 		if err != nil {
@@ -343,7 +344,8 @@ func GetInvoiceByID(invoiceID string) (*models.Invoice, error) {
 		&invoice.TotalTax,
 		&invoice.Total,
 		&invoice.TotalInWords,
-		&invoice.IsActive,		&invoice.IsGstBill,		&invoice.IsGstBill,
+		&invoice.IsActive,
+		&invoice.IsGstBill,
 		&productsJSON,
 	)
 	if err != nil {
