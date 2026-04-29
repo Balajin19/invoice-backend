@@ -35,6 +35,7 @@ type invoicePayload struct {
 	TotalTax      float64               `json:"totalTax"`
 	Total         float64               `json:"totalAmount"`
 	TotalInWords  string                `json:"amountInWords"`
+	IsGstBill     bool                  `json:"isGstBill"`
 	Products      []models.InvoiceProduct `json:"products"`
 }
 
@@ -118,6 +119,7 @@ func toInvoiceModel(payload invoicePayload) (models.Invoice, error) {
 		TotalTax:      payload.TotalTax,
 		Total:         payload.Total,
 		TotalInWords:  payload.TotalInWords,
+		IsGstBill:     payload.IsGstBill,
 		Products:      payload.Products,
 	}, nil
 }

@@ -371,9 +371,9 @@ func CreateInvoice(userEmail string, invoice models.Invoice) (*models.Invoice, e
 	INSERT INTO invoices (
 		invoice_id, invoice_number, invoice_date, company_id, customer_id, customer_name,
 		customer_address, gstin, payment_terms, po_number, po_date, sub_total, cgst, sgst, igst,
-		overall_discount, rounded_off, total_tax, total_amount, amount_in_words, created_by, updated_by
+		overall_discount, rounded_off, total_tax, total_amount, amount_in_words, is_gst_bill, created_by, updated_by
 	)
-	VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $20)
+	VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $21)
 	RETURNING invoice_id
 	`
 	err = tx.QueryRow(query,
@@ -396,6 +396,7 @@ func CreateInvoice(userEmail string, invoice models.Invoice) (*models.Invoice, e
 		invoice.TotalTax,
 		invoice.Total,
 		invoice.TotalInWords,
+		invoice.IsGstBill,
 		userEmail,
 	).Scan(&invoice.InvoiceId)
 	if err != nil {
@@ -468,8 +469,9 @@ func UpdateInvoice(invoiceID string, invoice models.Invoice, userEmail string) (
 	    total_tax        = $17,
 	    total_amount     = $18,
 	    amount_in_words  = $19,
-	    updated_by       = $20
-	WHERE invoice_id = $21
+	    is_gst_bill      = $20,
+	    updated_by       = $21
+	WHERE invoice_id = $22
 	`
 	result, err := tx.Exec(query,
 		invoice.InvoiceNumber,
@@ -491,6 +493,7 @@ func UpdateInvoice(invoiceID string, invoice models.Invoice, userEmail string) (
 		invoice.TotalTax,
 		invoice.Total,
 		invoice.TotalInWords,
+		invoice.IsGstBill,
 		userEmail,
 		invoiceID,
 	)
