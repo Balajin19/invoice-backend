@@ -305,7 +305,7 @@ func buildInvoicePDF(invoice *models.Invoice, data *invoicePDFData, orientation 
 	pdf.SetAutoPageBreak(false, 0)
 	pdf.AddPage()
 
-	pageWidth, _ := pdf.GetPageSize()
+	pageWidth, pageHeight := pdf.GetPageSize()
 	contentWidth := pageWidth - 16
 	isLandscape := strings.EqualFold(orientation, "L")
 
@@ -488,6 +488,7 @@ func buildInvoicePDF(invoice *models.Invoice, data *invoicePDFData, orientation 
 	}
 
 drawProductTableHeader(pdf, widths)
+productHeaderY := pdf.GetY()
 
 var totalQty float64
 var lineHeight float64 = 7.5
@@ -495,7 +496,7 @@ var multiLineHeight float64 = 6.0
 leftMargin := 8.0
 totalRowHeight := 7.0
 
-pageHeight, _ := pdf.GetPageSize()
+_, pageHeight = pdf.GetPageSize()
 bottomMargin := 8.0
 
 descriptions := make([]string, len(invoice.Products))
@@ -579,10 +580,14 @@ for i, p := range invoice.Products {
 	breakLimit := pageHeight - bottomMargin
 	rowRequiredHeight := rowHeight
 	if isLandscape {
-		remainingWithTotal := remainingRowHeights[i] + totalRowHeight
-		if pdf.GetY()+remainingWithTotal <= pageHeight-bottomMargin {
-			breakLimit = pageHeight - bottomMargin - landscapeFooterReserve
-			rowRequiredHeight = rowHeight + totalRowHeight
+		remainingWithTotalAndFooter := remainingRowHeights[i] + totalRowHeight + landscapeFooterReserve
+		// Force a break only when all remaining content (rows+total+footer) fits on a
+		// fresh page but cannot fit on the current page — ensures last page groups
+		// products together with the footer.
+		if productHeaderY+remainingWithTotalAndFooter <= pageHeight-bottomMargin &&
+			pdf.GetY()+remainingWithTotalAndFooter > pageHeight-bottomMargin {
+			pdf.AddPage()
+			drawProductTableHeader(pdf, widths)
 		}
 	}
 
@@ -671,7 +676,7 @@ pdf.CellFormat(widths[7], totalRowHeight, fmt.Sprintf("%.2f", invoice.Amount), "
 emptyTaxWidth := widths[8] + widths[9] + widths[10]
 pdf.CellFormat(emptyTaxWidth, totalRowHeight, "", "1", 1, "", false, 0, "")
 
-pageHeight, _ = pdf.GetPageSize()
+_, pageHeight = pdf.GetPageSize()
 bottomMargin = 8.0
 
 termsX := 8.0
